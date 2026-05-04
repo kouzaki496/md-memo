@@ -12,6 +12,12 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             notes::search_notes,
+            notes::list_notes,
+            notes::list_notes_detail,
+            notes::read_note,
+            notes::delete_note,
+            notes::delete_notes,
+            notes::toggle_pin_note,
             notes::save_note,
             config::get_config,
             config::save_config,

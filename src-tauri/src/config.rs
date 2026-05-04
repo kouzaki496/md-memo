@@ -17,12 +17,15 @@ pub struct AppConfig {
     /// ドキュメント直下のフォルダ名（相対）または絶対パス
     #[serde(default = "default_notes_dir", alias = "notes_dir")]
     pub notes_dir: String,
+    #[serde(default, alias = "pinned_paths")]
+    pub pinned_paths: Vec<String>,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
             notes_dir: default_notes_dir(),
+            pinned_paths: Vec::new(),
         }
     }
 }
@@ -67,6 +70,10 @@ pub fn get_config(app: tauri::AppHandle) -> AppConfig {
 
 #[tauri::command]
 pub fn save_config(app: tauri::AppHandle, config: AppConfig) -> Result<(), String> {
+    save_config_file(&app, &config)
+}
+
+pub fn save_config_file(app: &tauri::AppHandle, config: &AppConfig) -> Result<(), String> {
     let path = get_config_path(&app);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
