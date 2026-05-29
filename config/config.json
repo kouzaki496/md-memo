@@ -1,3 +1,5 @@
 {
-  "notesDir": "zen-memo-notes"
+  "notesDir": "zen-memo-notes",
+  "themeMode": "system",
+  "themePreset": "default"
 }

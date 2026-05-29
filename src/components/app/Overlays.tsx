@@ -1,4 +1,5 @@
 import type { NoteMeta } from "@/types/note";
+import { getMarkdownBody } from "@/lib/noteTags";
 
 type ContextMenuState = {
   note: NoteMeta;
@@ -23,6 +24,7 @@ type OverlaysProps = {
 
 export function Overlays(props: OverlaysProps) {
   const { contextMenu, hoverPreview, onPinOrUnpin, onDelete } = props;
+  const hoverPreviewBody = hoverPreview ? getMarkdownBody(hoverPreview.content) : "";
 
   return (
     <>
@@ -58,7 +60,7 @@ export function Overlays(props: OverlaysProps) {
           <div className="max-h-40 overflow-hidden whitespace-pre-wrap text-xs text-muted-foreground">
             {hoverPreview.loading
               ? "読み込み中..."
-              : hoverPreview.content.split("\n").slice(0, 8).join("\n") || "(空のメモ)"}
+              : hoverPreviewBody.split("\n").slice(0, 8).join("\n") || "(空のメモ)"}
           </div>
         </div>
       )}

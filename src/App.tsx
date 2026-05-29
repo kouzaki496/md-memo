@@ -4,11 +4,21 @@ import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import { Sidebar } from "@/components/app/Sidebar";
 import { ManagerPanel } from "@/components/app/ManagerPanel";
+import { SettingsPanel } from "@/components/app/SettingsPanel";
 import { ReadingEditorPane } from "@/components/app/ReadingEditorPane";
 import { Overlays } from "@/components/app/Overlays";
-import type { NoteMeta, SearchHit } from "@/types/note";
+import type { NoteMeta, ReplaceTagGloballyResult, SearchHit } from "@/types/note";
+import type { AppConfig, ThemeMode, ThemePreset } from "@/types/config";
 import { useNotesData } from "@/hooks/useNotesData";
 import { useHoverPreview } from "@/hooks/useHoverPreview";
+import {
+  DEFAULT_NEW_NOTE_TAG,
+  dedupeTagsCaseInsensitive,
+  ensureLockedInboxInTemplateTags,
+  getInboxAddBlockedMessage,
+  replaceTagTokenInList,
+  toggleTagInContent,
+} from "@/lib/noteTags";
 import "./App.css";
 
 type ContextMenuState = {
@@ -18,6 +28,7 @@ type ContextMenuState = {
 };
 
 function App() {
+  const collapsedSidebarWidth = 72;
   const [input, setInput] = useState("");
   const [currentPath, setCurrentPath] = useState<string | null>(null);
   const [activeHit, setActiveHit] = useState<SearchHit | null>(null);
@@ -28,6 +39,15 @@ function App() {
   const [previewWidth, setPreviewWidth] = useState(420);
   const [editorScale, setEditorScale] = useState(1);
   const [previewScale, setPreviewScale] = useState(1);
+  const [isSettingsMode, setIsSettingsMode] = useState(false);
+  const [configDraft, setConfigDraft] = useState<AppConfig | null>(null);
+  const [savedSettingsSnapshot, setSavedSettingsSnapshot] = useState<string | null>(null);
+  const [isSavingConfig, setIsSavingConfig] = useState(false);
+
+  const isSettingsDirty = useMemo(() => {
+    if (!configDraft || savedSettingsSnapshot == null) return false;
+    return JSON.stringify(configDraft) !== savedSettingsSnapshot;
+  }, [configDraft, savedSettingsSnapshot]);
 
   const {
     query,
@@ -63,6 +83,22 @@ function App() {
     return parts[parts.length - 1] || currentPath;
   }, [currentPath]);
 
+  const resolveIsDark = (mode: ThemeMode): boolean => {
+    if (mode === "dark") return true;
+    if (mode === "light") return false;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  };
+
+  const applyTheme = (mode: ThemeMode) => {
+    document.documentElement.classList.toggle("dark", resolveIsDark(mode));
+  };
+
+  const applyThemePreset = (preset: ThemePreset) => {
+    const root = document.documentElement;
+    if (preset === "default") root.removeAttribute("data-theme-preset");
+    else root.setAttribute("data-theme-preset", preset);
+  };
+
   const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
   const startSidebarResize = (startClientX: number) => {
@@ -91,7 +127,7 @@ function App() {
   const startPreviewResize = (startClientX: number) => {
     const startWidth = previewWidth;
     const minWidth = 300;
-    const leftArea = (isSidebarOpen ? sidebarWidth : 0) + 280;
+    const leftArea = (isSidebarOpen ? sidebarWidth : collapsedSidebarWidth) + 280;
     const maxWidth = Math.min(900, window.innerWidth - leftArea);
 
     const onMouseMove = (e: globalThis.MouseEvent) => {
@@ -128,6 +164,38 @@ function App() {
     setPreviewScale(1);
   };
 
+  const loadConfig = async () => {
+    const cfg = await invoke<AppConfig>("get_config");
+    const merged = {
+      ...cfg,
+      templateTags: ensureLockedInboxInTemplateTags(cfg.templateTags ?? []),
+      themeMode: cfg.themeMode ?? (cfg.darkMode ? "dark" : "light"),
+      themePreset: cfg.themePreset ?? "default",
+    };
+    applyTheme(merged.themeMode);
+    applyThemePreset(merged.themePreset);
+    setConfigDraft(merged);
+    setSavedSettingsSnapshot(JSON.stringify(merged));
+    return merged;
+  };
+
+  useEffect(() => {
+    void loadConfig().catch((err) => {
+      console.error(err);
+      applyTheme("light");
+      applyThemePreset("default");
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!configDraft) return;
+    if (configDraft.themeMode !== "system") return;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => applyTheme("system");
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, [configDraft?.themeMode]);
+
   useEffect(() => {
     if (saveTimerRef.current != null) {
       window.clearTimeout(saveTimerRef.current);
@@ -161,27 +229,37 @@ function App() {
   }, [input, currentPath, isEditMode]);
 
   const createNew = () => {
-    setInput("");
+    setInput(toggleTagInContent("", DEFAULT_NEW_NOTE_TAG));
     setCurrentPath(null);
     setActiveHit(null);
     setIsEditMode(true);
     setIsManageMode(false);
+    setIsSettingsMode(false);
     setStatus("Ready");
   };
 
   const openNote = async (path: string, hit?: SearchHit) => {
-    const content = await invoke<string>("read_note", { path });
-    setCurrentPath(path);
-    setInput(content);
-    setActiveHit(hit ?? null);
-    setIsEditMode(false);
-    setIsManageMode(false);
-    setStatus("Loaded");
+    try {
+      const content = await invoke<string>("read_note", { path });
+      setCurrentPath(path);
+      setInput(content);
+      setActiveHit(hit ?? null);
+      setIsEditMode(false);
+      setIsManageMode(false);
+      setIsSettingsMode(false);
+      setStatus("Loaded");
+    } catch (err) {
+      console.error(err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatus(`メモを開けませんでした: ${msg}`);
+      await loadNotes();
+    }
   };
 
   const enterEditMode = () => {
     setIsEditMode(true);
     setIsManageMode(false);
+    setIsSettingsMode(false);
     setActiveHit(null); // 編集開始時は検索ハイライトを消す
     setStatus("Edit mode");
   };
@@ -189,7 +267,100 @@ function App() {
   const enterPreviewMode = () => {
     setIsEditMode(false);
     setIsManageMode(false);
+    setIsSettingsMode(false);
     setStatus("Preview mode");
+  };
+
+  const openSettings = async () => {
+    setIsSettingsMode(true);
+    setIsManageMode(false);
+    try {
+      await loadConfig();
+      setStatus("Settings");
+    } catch (err) {
+      console.error(err);
+      setStatus("設定の読み込みに失敗しました");
+    }
+  };
+
+  const saveSettings = async () => {
+    if (!configDraft) return;
+    setIsSavingConfig(true);
+    try {
+      const payload = {
+        ...configDraft,
+        templateTags: ensureLockedInboxInTemplateTags(configDraft.templateTags),
+      };
+      await invoke("save_config", { config: payload });
+      applyTheme(payload.themeMode);
+      applyThemePreset(payload.themePreset);
+      setConfigDraft(payload);
+      setSavedSettingsSnapshot(JSON.stringify(payload));
+      await Promise.all([loadNotes(), loadNoteDetails()]);
+      setStatus("設定を保存しました");
+    } catch (err) {
+      console.error(err);
+      setStatus("設定の保存に失敗しました");
+    } finally {
+      setIsSavingConfig(false);
+    }
+  };
+
+  const normalizePathKey = (p: string) => p.replace(/\\/g, "/").toLowerCase();
+
+  const replaceTagGlobally = async (from: string, to: string) => {
+    const res = await invoke<ReplaceTagGloballyResult>("replace_tag_globally", { fromTag: from, toTag: to });
+    await Promise.all([loadNotes(), loadNoteDetails()]);
+    const changed = new Set(res.changedPaths.map(normalizePathKey));
+    if (currentPath && changed.has(normalizePathKey(currentPath))) {
+      const content = await invoke<string>("read_note", { path: currentPath });
+      setInput(content);
+    }
+    if (!isSettingsDirty) {
+      await loadConfig();
+    } else if (configDraft) {
+      setConfigDraft({
+        ...configDraft,
+        templateTags: ensureLockedInboxInTemplateTags(
+          dedupeTagsCaseInsensitive(replaceTagTokenInList(configDraft.templateTags, from, to))
+        ),
+      });
+    }
+    setStatus(`タグを置換しました（メモ ${res.filesChanged} 件を更新）`);
+  };
+
+  const closeSettings = () => {
+    if (isSettingsDirty) {
+      const ok = window.confirm("設定に未保存の変更があります。保存せず閉じますか？");
+      if (!ok) return;
+    }
+    if (savedSettingsSnapshot) {
+      try {
+        const restored = JSON.parse(savedSettingsSnapshot) as AppConfig;
+        const normalized: AppConfig = {
+          ...restored,
+          themeMode: restored.themeMode ?? (restored.darkMode ? "dark" : "light"),
+          themePreset: restored.themePreset ?? "default",
+        };
+        setConfigDraft(normalized);
+        applyTheme(normalized.themeMode);
+        applyThemePreset(normalized.themePreset);
+      } catch {
+        /* ignore */
+      }
+    }
+    setIsSettingsMode(false);
+  };
+
+  const toggleTemplateTag = (rawTag: string) => {
+    setInput((prev) => {
+      const blocked = getInboxAddBlockedMessage(prev, rawTag);
+      if (blocked) {
+        queueMicrotask(() => setStatus(blocked));
+        return prev;
+      }
+      return toggleTagInContent(prev, rawTag);
+    });
   };
 
   const openContextMenu = (e: MouseEvent, note: NoteMeta) => {
@@ -218,6 +389,14 @@ function App() {
     await Promise.all([loadNotes(), loadNoteDetails()]);
     setContextMenu(null);
     setStatus("Deleted");
+  };
+
+  const deleteCurrentNote = () => {
+    if (!currentPath) return;
+    const fromList =
+      pinned.find((n) => n.path === currentPath) ?? recent.find((n) => n.path === currentPath);
+    const meta: NoteMeta = fromList ?? { path: currentPath, title: currentFileName, pinned: false, tags: [] };
+    void deleteNote(meta);
   };
 
   useEffect(() => {
@@ -254,11 +433,48 @@ function App() {
     };
   }, [contextMenu]);
 
+  useEffect(() => {
+    void loadConfig().catch((err) => {
+      console.error(err);
+    });
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.key.toLowerCase() !== "f") return;
+
+      if (!e.shiftKey) {
+        // Ctrl/Cmd + F は WebView 既定検索へ
+        return;
+      }
+      // Ctrl/Cmd + Shift + F はアプリ内（自前）検索へ
+      e.preventDefault();
+
+      if (!isSidebarOpen) {
+        setIsSidebarOpen(true);
+      }
+
+      requestAnimationFrame(() => {
+        const input = document.getElementById("app-search-input");
+        if (input instanceof HTMLInputElement) {
+          input.focus();
+          input.select();
+        }
+      });
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isSidebarOpen]);
+
   return (
-    <div className="flex h-screen w-full bg-gradient-to-br from-background via-background to-muted/30 text-foreground">
-      {isSidebarOpen && (
+    <div className="flex h-screen w-full overflow-hidden bg-gradient-to-br from-background via-background to-muted/30 text-foreground">
+      {isSidebarOpen ? (
         <>
-          <div style={{ width: `${sidebarWidth}px` }} className="shrink-0 min-w-0">
+          <div style={{ width: `${sidebarWidth}px` }} className="h-full min-h-0 shrink-0 min-w-0">
             <Sidebar
               query={query}
               setQuery={setQuery}
@@ -269,7 +485,11 @@ function App() {
               currentPath={currentPath}
               status={status}
               onCreateNew={createNew}
-              onOpenManager={() => void openManager()}
+              onOpenManager={() => {
+                setIsSettingsMode(false);
+                void openManager();
+              }}
+              onOpenSettings={() => void openSettings()}
               onOpenNote={(path, hit) => void openNote(path, hit)}
               onOpenContextMenu={openContextMenu}
               onOpenHoverPreview={openHoverPreview}
@@ -288,33 +508,54 @@ function App() {
             }}
           />
         </>
-      )}
-
-      {!isSidebarOpen && (
+      ) : (
         <>
-          <Button
-            variant="outline"
-            size="icon-sm"
-            className="fixed left-4 top-4 z-40 bg-background/90 shadow-sm"
-            onClick={() => setIsSidebarOpen(true)}
-            title="サイドバーを開く"
+          <aside
+            className="h-full min-h-0 shrink-0 border-r bg-muted/25 px-2 py-3"
+            style={{ width: `${collapsedSidebarWidth}px` }}
           >
-            <PanelLeftOpen className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="default"
-            size="icon"
-            className="fixed bottom-6 left-6 z-40 rounded-full shadow-lg"
-            onClick={createNew}
-            title="新規メモ"
-          >
-            <Plus className="h-5 w-5" />
-          </Button>
+            <div className="flex h-full flex-col items-center gap-2">
+              <Button
+                variant="outline"
+                size="icon-sm"
+                className="rounded-md border border-border bg-background/95 shadow-sm hover:bg-muted/80"
+                onClick={() => setIsSidebarOpen(true)}
+                title="サイドバーを開く"
+                aria-label="サイドバーを開く"
+              >
+                <PanelLeftOpen className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="default"
+                size="icon-sm"
+                className="rounded-md shadow-sm ring-1 ring-primary/25 hover:ring-primary/40"
+                onClick={createNew}
+                title="新規メモを作成"
+                aria-label="新規メモを作成"
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
+          </aside>
         </>
       )}
 
-      <div className="flex-1 min-w-0">
-        {isManageMode ? (
+      <div className="flex min-h-0 flex-1 min-w-0 flex-col">
+        {isSettingsMode && configDraft ? (
+          <SettingsPanel
+            config={configDraft}
+            isSaving={isSavingConfig}
+            hasUnsavedChanges={isSettingsDirty}
+            onChangeConfig={(next) => {
+              setConfigDraft(next);
+              applyTheme(next.themeMode);
+              applyThemePreset(next.themePreset);
+            }}
+            onSave={() => void saveSettings()}
+            onClose={closeSettings}
+            onReplaceTagGlobally={(from, to) => replaceTagGlobally(from, to)}
+          />
+        ) : isManageMode ? (
           <ManagerPanel
             managerQuery={managerQuery}
             setManagerQuery={setManagerQuery}
@@ -336,19 +577,23 @@ function App() {
         ) : (
           <ReadingEditorPane
             isEditMode={isEditMode}
+            currentPath={currentPath}
             currentFileName={currentFileName}
             input={input}
             previewWidth={previewWidth}
             editorScale={editorScale}
             previewScale={previewScale}
+            templateTags={configDraft?.templateTags ?? []}
             onEnterEditMode={enterEditMode}
             onEnterPreviewMode={enterPreviewMode}
             onChangeInput={setInput}
+            onToggleTemplateTag={toggleTemplateTag}
             onStartPreviewResize={startPreviewResize}
             onAdjustEditorScale={adjustEditorScale}
             onAdjustPreviewScale={adjustPreviewScale}
             onResetEditorScale={resetEditorScale}
             onResetPreviewScale={resetPreviewScale}
+            onDeleteCurrentNote={deleteCurrentNote}
             editorRef={editorRef}
           />
         )}

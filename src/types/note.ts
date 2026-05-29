@@ -2,6 +2,7 @@ export type NoteMeta = {
   path: string;
   title: string;
   pinned: boolean;
+  tags: string[];
 };
 
 export type SearchHit = {
@@ -14,7 +15,14 @@ export type NoteDetail = {
   path: string;
   title: string;
   pinned: boolean;
+  tags: string[];
   charCount: number;
   updatedMs: number;
   preview: string;
+};
+
+export type ReplaceTagGloballyResult = {
+  filesChanged: number;
+  changedPaths: string[];
+  templateTags: string[];
 };

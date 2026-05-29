@@ -6,9 +6,17 @@ mod notes;
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let handle = app.handle();
-            config::ensure_config_file_exists(&handle)
+            config::ensure_config_file_exists(handle)?;
+            if let Err(e) = config::prune_stale_pinned_paths(handle) {
+                eprintln!("prune_stale_pinned_paths: {e}");
+            }
+            if let Err(e) = notes::ensure_editor_shortcuts_note(handle) {
+                eprintln!("ensure_editor_shortcuts_note: {e}");
+            }
+            Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             notes::search_notes,
@@ -19,6 +27,8 @@ fn main() {
             notes::delete_notes,
             notes::toggle_pin_note,
             notes::save_note,
+            notes::upsert_system_note,
+            notes::replace_tag_globally,
             config::get_config,
             config::save_config,
         ])

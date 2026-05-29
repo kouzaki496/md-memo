@@ -1,6 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { NoteDetail, NoteMeta, SearchHit } from "@/types/note";
+import { buildShortcutMemoContent } from "@/config/shortcutMemo";
+
+/** 語に大文字が含まれる場合は大小区別、それ以外は大小区別なし（Rust の search と同趣旨） */
+function fieldMatchesQuery(haystack: string, needle: string): boolean {
+  if (needle.length === 0) return true;
+  const caseSensitive = /[\p{Lu}]/u.test(needle);
+  if (caseSensitive) {
+    return haystack.includes(needle);
+  }
+  return haystack.toLowerCase().includes(needle.toLowerCase());
+}
+
+function isEditorShortcutsNote(n: NoteMeta): boolean {
+  return n.title.toLowerCase() === "editor-shortcuts.md";
+}
 
 export function useNotesData() {
   const [query, setQuery] = useState("");
@@ -17,14 +32,14 @@ export function useNotesData() {
   const recent = useMemo(() => notes.filter((n) => !n.pinned).slice(0, 10), [notes]);
 
   const filteredDetails = useMemo(() => {
-    const q = managerQuery.trim().toLowerCase();
+    const q = managerQuery.trim();
     const max = Number(maxChars);
     return noteDetails.filter((n) => {
       const queryOk =
         q.length === 0 ||
-        n.title.toLowerCase().includes(q) ||
-        n.preview.toLowerCase().includes(q) ||
-        n.path.toLowerCase().includes(q);
+        fieldMatchesQuery(n.title, q) ||
+        fieldMatchesQuery(n.preview, q) ||
+        fieldMatchesQuery(n.path, q);
       const lengthOk = !Number.isFinite(max) || max <= 0 || n.charCount <= max;
       return queryOk && lengthOk;
     });
@@ -73,11 +88,42 @@ export function useNotesData() {
     await loadNoteDetails();
   };
 
-  useEffect(() => {
-    void loadNotes().catch((err) => {
-      console.error(err);
-      setStatus("メモ一覧の取得に失敗しました");
+  const ensureShortcutMemo = async () => {
+    const content = buildShortcutMemoContent();
+    await invoke<string>("upsert_system_note", {
+      fileName: "editor-shortcuts.md",
+      content,
+      pin: true,
     });
+  };
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        await ensureShortcutMemo();
+      } catch (err) {
+        console.error(err);
+        try {
+          const list = await invoke<NoteMeta[]>("list_notes");
+          if (!list.some(isEditorShortcutsNote)) {
+            setStatus(
+              "ショートカット説明メモの作成に失敗しました（書き込み権限や保存先フォルダを確認してください）"
+            );
+          }
+        } catch {
+          setStatus(
+            "ショートカット説明メモの作成に失敗しました（書き込み権限や保存先フォルダを確認してください）"
+          );
+        }
+      }
+
+      try {
+        await loadNotes();
+      } catch (err) {
+        console.error(err);
+        setStatus("メモ一覧の取得に失敗しました");
+      }
+    })();
   }, []);
 
   useEffect(() => {

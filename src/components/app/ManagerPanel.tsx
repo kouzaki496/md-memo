@@ -3,7 +3,7 @@ import { Pin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import type { NoteDetail } from "@/types/note";
+import type { NoteDetail, NoteMeta } from "@/types/note";
 
 type ManagerPanelProps = {
   managerQuery: string;
@@ -19,7 +19,7 @@ type ManagerPanelProps = {
   onDeleteSelected: () => void;
   onToggleSelect: (path: string) => void;
   onOpenNote: (path: string) => void;
-  onOpenHoverPreview: (e: MouseEvent, note: { path: string; title: string; pinned: boolean }) => void;
+  onOpenHoverPreview: (e: MouseEvent, note: NoteMeta) => void;
   onMoveHoverPreview: (e: MouseEvent) => void;
   onCloseHoverPreview: () => void;
 };
@@ -44,8 +44,24 @@ export function ManagerPanel(props: ManagerPanelProps) {
     onCloseHoverPreview,
   } = props;
 
+  const renderTags = (tags: string[]) => {
+    if (tags.length === 0) return null;
+    return (
+      <div className="mt-1 flex flex-wrap gap-1">
+        {tags.slice(0, 4).map((tag) => (
+          <span
+            key={tag}
+            className="rounded-full border border-border/70 bg-background/60 px-1.5 py-0 text-[10px] leading-4 text-muted-foreground"
+          >
+            #{tag}
+          </span>
+        ))}
+      </div>
+    );
+  };
+
   return (
-    <main className="flex-1 flex flex-col bg-background">
+    <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
       <div className="h-12 border-b flex items-center justify-between px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-background/80">
         <span>メモ一覧管理</span>
         <div className="flex items-center gap-2">
@@ -77,13 +93,15 @@ export function ManagerPanel(props: ManagerPanelProps) {
           選択削除 ({selectedCount})
         </Button>
       </div>
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1 overflow-hidden">
         <div className="p-3 space-y-2">
           {filteredDetails.map((n) => (
             <div
               key={n.path}
               className="flex items-start gap-3 rounded-md border bg-card p-3 hover:bg-muted/30"
-              onMouseEnter={(e) => onOpenHoverPreview(e, { path: n.path, title: n.title, pinned: n.pinned })}
+              onMouseEnter={(e) =>
+                onOpenHoverPreview(e, { path: n.path, title: n.title, pinned: n.pinned, tags: n.tags })
+              }
               onMouseMove={onMoveHoverPreview}
               onMouseLeave={onCloseHoverPreview}
             >
@@ -99,6 +117,7 @@ export function ManagerPanel(props: ManagerPanelProps) {
                     {n.title}
                     {n.pinned && <Pin className="ml-1 inline-block h-3.5 w-3.5 align-text-top text-muted-foreground" />}
                   </div>
+                  {renderTags(n.tags)}
                   <div className="mt-1 text-xs text-muted-foreground">
                     {n.charCount} 文字
                     {n.preview ? ` / ${n.preview}` : " / (空のメモ)"}
