@@ -22,6 +22,7 @@ import {
   ChevronRight,
   Eye,
   Lightbulb,
+  Lock,
   Minus,
   Pencil,
   Plus,
@@ -31,7 +32,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { editorShortcutConfig, matchesShortcut } from "@/config/editorShortcuts";
-import { getMarkdownBody, getMarkdownBodyStartOffset, parseNoteContent } from "@/lib/noteTags";
+import {
+  buildEditorTagChips,
+  getMarkdownBody,
+  getMarkdownBodyStartOffset,
+  parseNoteContent,
+} from "@/lib/noteTags";
+import { isBuiltinReservedTagName } from "@/lib/reservedTags";
+import { messages } from "@/lib/messages";
 import { cn } from "@/lib/utils";
 
 const toolbarBtn =
@@ -103,6 +111,7 @@ function writeTagsBarExpanded(expanded: boolean) {
 
 type ReadingEditorPaneProps = {
   isEditMode: boolean;
+  isReadOnly: boolean;
   /** 保存済みメモのパス。未保存の新規のみ null */
   currentPath: string | null;
   currentFileName: string;
@@ -409,6 +418,7 @@ function duplicateLineBlock(
 export function ReadingEditorPane(props: ReadingEditorPaneProps) {
   const {
     isEditMode,
+    isReadOnly,
     currentPath,
     currentFileName,
     input,
@@ -435,12 +445,23 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
     () => Math.max(1, previewMarkdown.split("\n").length),
     [previewMarkdown]
   );
+
+  const readOnlyBadge = isReadOnly ? (
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border/70 bg-muted/50 px-2 py-0.5 text-[10px] font-medium normal-case tracking-normal text-muted-foreground">
+      <Lock className="h-3 w-3" />
+      {messages.tags.readOnlyBadge}
+    </span>
+  ) : null;
   const editorGutterInnerRef = useRef<HTMLDivElement>(null);
   const splitPreviewScrollHostRef = useRef<HTMLDivElement>(null);
   const scrollSyncLockRef = useRef<"editor" | "preview" | null>(null);
   const editorFontSizeRem = 1.125 * editorScale;
   const editorLineHeightRem = 1.8 * editorScale;
   const previewFmTags = useMemo(() => parseNoteContent(input).tags, [input]);
+  const editorTagChips = useMemo(
+    () => buildEditorTagChips(templateTags, previewFmTags),
+    [templateTags, previewFmTags]
+  );
   const activeTagSet = useMemo(() => {
     const tags = parseNoteContent(input).tags;
     return new Set(tags.map((t) => t.toLowerCase()));
@@ -1101,7 +1122,7 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
   };
 
   const renderPreviewLines = () => {
-    const segments = splitPreviewSegments(previewMarkdown || "*(empty)*");
+    const segments = splitPreviewSegments(previewMarkdown || messages.manager.emptyPreview);
     const hl = previewBodyHighlight;
     return segments.map((segment, index) => {
       if (segment.type === "markdown") {
@@ -1141,19 +1162,25 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
   const renderPreviewTagsBar = () => {
     if (previewFmTags.length === 0) return null;
     return (
-      <div className="mb-5 flex flex-wrap items-center gap-2" aria-label="フロントマターのタグ">
-        <span className="text-[11px] uppercase tracking-wider text-muted-foreground shrink-0">Tags</span>
+      <div className="mb-5 flex flex-wrap items-center gap-2" aria-label={messages.tags.previewLabel}>
+        <span className="text-[11px] uppercase tracking-wider text-muted-foreground shrink-0">
+          {messages.tags.previewLabel}
+        </span>
         {previewFmTags.map((tag, i) => {
           const listed = templateTags.some((t) => t.toLowerCase() === tag.toLowerCase());
+          const reserved = isBuiltinReservedTagName(tag);
           return (
             <span
               key={`${tag}-${i}`}
               className={cn(
                 "rounded-full border px-2.5 py-0.5 text-xs font-medium",
-                listed
-                  ? "border-primary/35 bg-primary/12 text-primary"
-                  : "border-border bg-muted/55 text-muted-foreground"
+                reserved
+                  ? "border-border bg-muted/40 text-muted-foreground"
+                  : listed
+                    ? "border-primary/35 bg-primary/12 text-primary"
+                    : "border-border bg-muted/55 text-muted-foreground"
               )}
+              title={reserved ? messages.tags.builtinLabel : undefined}
             >
               {tag}
             </span>
@@ -1168,15 +1195,17 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
       <div className="flex h-full min-h-0 min-w-0 flex-1">
         <main className="min-h-0 min-w-0 flex-1 flex flex-col bg-background">
           <div className="h-12 shrink-0 border-b flex items-center justify-between px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-background/80">
-            <span className="min-w-0 truncate">Editor - {currentFileName}</span>
+            <span className="min-w-0 truncate">
+              {messages.editor.editorTitle} — {currentFileName}
+            </span>
             <div className="flex items-center gap-1">
               <Button
                 type="button"
                 variant="outline"
                 size="icon-sm"
                 className={toolbarBtn}
-                title="エディタの文字を小さく"
-                aria-label="エディタの文字を小さく"
+                title={messages.editor.zoomOut}
+                aria-label={messages.editor.zoomOut}
                 onClick={() => onAdjustEditorScale(-0.1)}
               >
                 <Minus className="h-4 w-4" />
@@ -1186,8 +1215,8 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
                 variant="outline"
                 size="icon-sm"
                 className={toolbarBtn}
-                title="エディタの文字を大きく"
-                aria-label="エディタの文字を大きく"
+                title={messages.editor.zoomIn}
+                aria-label={messages.editor.zoomIn}
                 onClick={() => onAdjustEditorScale(0.1)}
               >
                 <Plus className="h-4 w-4" />
@@ -1197,8 +1226,8 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
                 variant="outline"
                 size="icon-sm"
                 className={toolbarBtn}
-                title="プレビューのみ表示"
-                aria-label="プレビューのみ表示"
+                title={messages.editor.previewOnly}
+                aria-label={messages.editor.previewOnly}
                 onClick={onEnterPreviewMode}
               >
                 <Eye className="h-4 w-4" />
@@ -1229,7 +1258,7 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
             <textarea
               ref={editorRef}
               className="min-h-0 min-w-0 flex-1 resize-none overflow-y-auto bg-transparent px-12 py-12 font-mono focus:outline-none"
-              placeholder="Type something..."
+              placeholder={messages.editor.placeholder}
               value={input}
               onChange={(e) => {
                 shortcutUndoRef.current = [];
@@ -1250,7 +1279,7 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
               }}
             />
           </div>
-          {templateTags.length > 0 && (
+          {editorTagChips.length > 0 && (
             <div className="shrink-0 border-t bg-background/80">
               <button
                 type="button"
@@ -1265,10 +1294,12 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
                 ) : (
                   <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
                 )}
-                <span className="text-[11px] uppercase tracking-wider text-muted-foreground shrink-0">Tags</span>
+                <span className="text-[11px] uppercase tracking-wider text-muted-foreground shrink-0">
+                  {messages.editor.tagsBar}
+                </span>
                 {!tagsBarExpanded && (
                   <span className="min-w-0 truncate text-xs text-muted-foreground" title={previewFmTags.join(", ") || undefined}>
-                    {previewFmTags.length > 0 ? previewFmTags.join(", ") : "（付与なし）"}
+                    {previewFmTags.length > 0 ? previewFmTags.join(", ") : messages.editor.tagsNone}
                   </span>
                 )}
               </button>
@@ -1279,7 +1310,7 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
                   role="group"
                   aria-labelledby="editor-tags-bar-toggle"
                 >
-                  {templateTags.map((tag) => {
+                  {editorTagChips.map((tag) => {
                     const on = activeTagSet.has(tag.toLowerCase());
                     return (
                       <Button
@@ -1293,8 +1324,8 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
                         )}
                         title={
                           on
-                            ? `「${tag}」を外す（先頭の YAML フロントマター tags）`
-                            : `「${tag}」を付ける（先頭に tags を書きます。本文の # 見出しとは別です）`
+                            ? `${messages.tags.detach(tag)}（${messages.tags.detachHint}）`
+                            : `${messages.tags.attach(tag)}（${messages.tags.attachHint}）`
                         }
                         onClick={() => onToggleTemplateTag(tag)}
                       >
@@ -1320,9 +1351,10 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
         >
           <div className="h-12 shrink-0 border-b flex items-center justify-between gap-2 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">
             <span className="flex min-w-0 items-baseline gap-2">
-              <span className="min-w-0 truncate">Preview</span>
+              <span className="min-w-0 truncate">{messages.editor.previewTitle}</span>
+              {readOnlyBadge}
               <span className="shrink-0 normal-case tabular-nums tracking-normal text-[11px] text-muted-foreground/90">
-                {previewBodyLineCount} 行
+                {messages.editor.lineCount(previewBodyLineCount)}
               </span>
             </span>
             <div className="flex items-center gap-1">
@@ -1331,8 +1363,8 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
                 variant="outline"
                 size="icon-sm"
                 className={toolbarBtn}
-                title="プレビューの文字を小さく"
-                aria-label="プレビューの文字を小さく"
+                title={messages.editor.zoomOut}
+                aria-label={messages.editor.zoomOut}
                 onClick={() => onAdjustPreviewScale(-0.1)}
               >
                 <Minus className="h-4 w-4" />
@@ -1342,31 +1374,31 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
                 variant="outline"
                 size="icon-sm"
                 className={toolbarBtn}
-                title="プレビューの文字を大きく"
-                aria-label="プレビューの文字を大きく"
+                title={messages.editor.zoomIn}
+                aria-label={messages.editor.zoomIn}
                 onClick={() => onAdjustPreviewScale(0.1)}
               >
                 <Plus className="h-4 w-4" />
               </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                className={cn(
-                  toolbarBtn,
-                  "text-destructive hover:bg-destructive/10 hover:text-destructive"
-                )}
-                title={
-                  currentPath
-                    ? "このメモを削除"
-                    : "ファイルに保存されていないため削除できません"
-                }
-                aria-label="このメモを削除"
-                disabled={!currentPath}
-                onClick={() => onDeleteCurrentNote()}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
+              {!isReadOnly && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-sm"
+                  className={cn(
+                    toolbarBtn,
+                    "text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  )}
+                  title={
+                    currentPath ? messages.editor.deleteNote : messages.editor.deleteNoteDisabled
+                  }
+                  aria-label={messages.editor.deleteNote}
+                  disabled={!currentPath}
+                  onClick={() => onDeleteCurrentNote()}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              )}
             </div>
           </div>
           <div ref={splitPreviewScrollHostRef} className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -1392,9 +1424,12 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
     <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
       <div className="h-12 shrink-0 border-b flex items-center justify-between gap-2 px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-background/80">
         <span className="flex min-w-0 items-baseline gap-2">
-          <span className="min-w-0 truncate">Preview - {currentFileName}</span>
+          <span className="min-w-0 truncate">
+            {messages.editor.previewTitle} — {currentFileName}
+          </span>
+          {readOnlyBadge}
           <span className="shrink-0 normal-case tabular-nums tracking-normal text-[11px] text-muted-foreground/90">
-            {previewBodyLineCount} 行
+            {messages.editor.lineCount(previewBodyLineCount)}
           </span>
         </span>
         <div className="flex items-center gap-1">
@@ -1403,8 +1438,8 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
             variant="outline"
             size="icon-sm"
             className={toolbarBtn}
-            title="プレビューの文字を小さく"
-            aria-label="プレビューの文字を小さく"
+            title={messages.editor.zoomOut}
+            aria-label={messages.editor.zoomOut}
             onClick={() => onAdjustPreviewScale(-0.1)}
           >
             <Minus className="h-4 w-4" />
@@ -1414,42 +1449,44 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
             variant="outline"
             size="icon-sm"
             className={toolbarBtn}
-            title="プレビューの文字を大きく"
-            aria-label="プレビューの文字を大きく"
+            title={messages.editor.zoomIn}
+            aria-label={messages.editor.zoomIn}
             onClick={() => onAdjustPreviewScale(0.1)}
           >
             <Plus className="h-4 w-4" />
           </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="icon-sm"
-            className={toolbarBtn}
-            title="編集モードに切り替え"
-            aria-label="編集モードに切り替え"
-            onClick={onEnterEditMode}
-          >
-            <Pencil className="h-4 w-4" />
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="icon-sm"
-            className={cn(
-              toolbarBtn,
-              "text-destructive hover:bg-destructive/10 hover:text-destructive"
-            )}
-            title={
-              currentPath
-                ? "このメモを削除"
-                : "ファイルに保存されていないため削除できません"
-            }
-            aria-label="このメモを削除"
-            disabled={!currentPath}
-            onClick={() => onDeleteCurrentNote()}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          {!isReadOnly && (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                className={toolbarBtn}
+                title={messages.editor.editMode}
+                aria-label={messages.editor.editMode}
+                onClick={onEnterEditMode}
+              >
+                <Pencil className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                className={cn(
+                  toolbarBtn,
+                  "text-destructive hover:bg-destructive/10 hover:text-destructive"
+                )}
+                title={
+                  currentPath ? messages.editor.deleteNote : messages.editor.deleteNoteDisabled
+                }
+                aria-label={messages.editor.deleteNote}
+                disabled={!currentPath}
+                onClick={() => onDeleteCurrentNote()}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </>
+          )}
         </div>
       </div>
       <ScrollArea className="min-h-0 flex-1 overflow-hidden p-8">

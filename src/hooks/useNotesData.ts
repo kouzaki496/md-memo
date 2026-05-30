@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { NoteDetail, NoteMeta, SearchHit } from "@/types/note";
 import { buildShortcutMemoContent } from "@/config/shortcutMemo";
+import { isSystemNoteFileName, isSystemNotePath } from "@/lib/systemNotes";
+import { messages } from "@/lib/messages";
 
 /** 語に大文字が含まれる場合は大小区別、それ以外は大小区別なし（Rust の search と同趣旨） */
 function fieldMatchesQuery(haystack: string, needle: string): boolean {
@@ -14,14 +16,14 @@ function fieldMatchesQuery(haystack: string, needle: string): boolean {
 }
 
 function isEditorShortcutsNote(n: NoteMeta): boolean {
-  return n.title.toLowerCase() === "editor-shortcuts.md";
+  return isSystemNoteFileName(n.title);
 }
 
 export function useNotesData() {
   const [query, setQuery] = useState("");
   const [notes, setNotes] = useState<NoteMeta[]>([]);
   const [searchResults, setSearchResults] = useState<SearchHit[]>([]);
-  const [status, setStatus] = useState("Ready");
+  const [status, setStatus] = useState<string>(messages.status.ready);
   const [isManageMode, setIsManageMode] = useState(false);
   const [noteDetails, setNoteDetails] = useState<NoteDetail[]>([]);
   const [managerQuery, setManagerQuery] = useState("");
@@ -56,6 +58,7 @@ export function useNotesData() {
   };
 
   const toggleSelect = (path: string) => {
+    if (isSystemNotePath(path)) return;
     setSelectedPaths((prev) => {
       const next = new Set(prev);
       if (next.has(path)) next.delete(path);
@@ -65,7 +68,9 @@ export function useNotesData() {
   };
 
   const selectAllFiltered = () => {
-    setSelectedPaths(new Set(filteredDetails.map((n) => n.path)));
+    setSelectedPaths(
+      new Set(filteredDetails.filter((n) => !isSystemNotePath(n.path)).map((n) => n.path))
+    );
   };
 
   const clearSelection = () => {
@@ -73,11 +78,21 @@ export function useNotesData() {
   };
 
   const deleteSelected = async () => {
-    if (selectedPaths.size === 0) return 0;
-    const ok = window.confirm(`選択した ${selectedPaths.size} 件を削除しますか？`);
+    const paths = Array.from(selectedPaths).filter((p) => !isSystemNotePath(p));
+    if (paths.length === 0) {
+      if (selectedPaths.size > 0) {
+        setStatus(messages.status.builtinNoDelete);
+      }
+      return 0;
+    }
+    const ok = window.confirm(messages.confirm.deleteSelected(paths.length));
     if (!ok) return 0;
-    const deleted = await invoke<number>("delete_notes", { paths: Array.from(selectedPaths) });
-    setStatus(`Deleted ${deleted} notes`);
+    const deleted = await invoke<number>("delete_notes", { paths });
+    if (deleted < selectedPaths.size) {
+      setStatus(messages.status.deletedCountSkippedBuiltin(deleted));
+    } else {
+      setStatus(messages.status.deletedCount(deleted));
+    }
     clearSelection();
     await Promise.all([loadNotes(), loadNoteDetails()]);
     return deleted;
@@ -97,6 +112,10 @@ export function useNotesData() {
     });
   };
 
+  const ensureMarkdownReferenceMemo = async () => {
+    await invoke("ensure_markdown_reference_note");
+  };
+
   useEffect(() => {
     void (async () => {
       try {
@@ -106,22 +125,24 @@ export function useNotesData() {
         try {
           const list = await invoke<NoteMeta[]>("list_notes");
           if (!list.some(isEditorShortcutsNote)) {
-            setStatus(
-              "ショートカット説明メモの作成に失敗しました（書き込み権限や保存先フォルダを確認してください）"
-            );
+            setStatus(messages.status.shortcutMemoFailed);
           }
         } catch {
-          setStatus(
-            "ショートカット説明メモの作成に失敗しました（書き込み権限や保存先フォルダを確認してください）"
-          );
+          setStatus(messages.status.shortcutMemoFailed);
         }
+      }
+
+      try {
+        await ensureMarkdownReferenceMemo();
+      } catch (err) {
+        console.error(err);
       }
 
       try {
         await loadNotes();
       } catch (err) {
         console.error(err);
-        setStatus("メモ一覧の取得に失敗しました");
+        setStatus(messages.status.notesLoadFailed);
       }
     })();
   }, []);
@@ -138,7 +159,7 @@ export function useNotesData() {
       .then(setSearchResults)
       .catch((err) => {
         console.error(err);
-        setStatus("検索に失敗しました");
+        setStatus(messages.status.searchFailed);
       });
   }, [query, notes]);
 

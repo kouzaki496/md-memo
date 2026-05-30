@@ -1,11 +1,12 @@
 import { type MouseEvent, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Clock, List, PanelLeftClose, Pin, Plus, Search, Settings } from "lucide-react";
+import { ChevronDown, ChevronRight, Clock, List, Lock, PanelLeftClose, Pin, Plus, Search, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import type { NoteMeta, SearchHit } from "@/types/note";
 import { INBOX_EXCLUSIVE_MESSAGE } from "@/lib/noteTags";
+import { messages } from "@/lib/messages";
 import { cn } from "@/lib/utils";
 
 type SidebarProps = {
@@ -79,7 +80,7 @@ export function Sidebar(props: SidebarProps) {
     <aside className="h-full min-h-0 w-full overflow-hidden border-r bg-muted/35 backdrop-blur supports-[backdrop-filter]:bg-muted/20 flex flex-col">
       <div className="p-4 space-y-4 border-b bg-background/70">
         <div className="flex items-center justify-between">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Memo Desk</div>
+          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{messages.sidebar.appName}</div>
           <Button
             variant="outline"
             size="icon-sm"
@@ -97,7 +98,7 @@ export function Sidebar(props: SidebarProps) {
           className="w-full justify-start gap-2 rounded-md shadow-md ring-1 ring-primary/25 hover:ring-primary/40"
           title="新規メモを作成"
         >
-          <Plus className="w-4 h-4" /> New Memo
+          <Plus className="w-4 h-4" /> {messages.sidebar.newMemo}
         </Button>
         <Button
           onClick={onOpenManager}
@@ -105,7 +106,7 @@ export function Sidebar(props: SidebarProps) {
           className="w-full justify-start gap-2 rounded-md border border-border bg-background shadow-sm hover:bg-muted/80"
           title="メモ一覧の管理・一括操作"
         >
-          <List className="w-4 h-4 shrink-0" /> 一覧管理
+          <List className="w-4 h-4 shrink-0" /> {messages.sidebar.manager}
         </Button>
         <Button
           onClick={onOpenSettings}
@@ -113,13 +114,13 @@ export function Sidebar(props: SidebarProps) {
           className="w-full justify-start gap-2 rounded-md border border-border bg-background shadow-sm hover:bg-muted/80"
           title="設定を開く"
         >
-          <Settings className="w-4 h-4 shrink-0" /> 設定
+          <Settings className="w-4 h-4 shrink-0" /> {messages.sidebar.settings}
         </Button>
         <div className="relative">
           <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             id="app-search-input"
-            placeholder="Search..."
+            placeholder={messages.sidebar.searchPlaceholder}
             className="pl-8 bg-background/90 shadow-sm"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -132,7 +133,7 @@ export function Sidebar(props: SidebarProps) {
           <div>
             <h4 className="mb-2 px-2 text-xs font-semibold tracking-tight text-muted-foreground flex items-center justify-between gap-2">
               <span className="flex items-center gap-2">
-                <Pin className="w-3 h-3" /> Pinned
+                <Pin className="w-3 h-3" /> {messages.sidebar.pinned}
               </span>
               <span className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{pinned.length}</span>
             </h4>
@@ -149,12 +150,17 @@ export function Sidebar(props: SidebarProps) {
                   onMouseLeave={onCloseHoverPreview}
                 >
                   <span className="block min-w-0 text-left">
-                    <span className="block truncate">{n.title}</span>
+                    <span className="flex min-w-0 items-center gap-1 truncate">
+                      <span className="truncate">{n.title}</span>
+                      {n.systemNote && (
+                        <Lock className="h-3 w-3 shrink-0 text-muted-foreground" aria-label={messages.aria.builtinNote} />
+                      )}
+                    </span>
                     {renderNoteTags(n.tags)}
                   </span>
                 </Button>
               ))}
-              {pinned.length === 0 && <div className="px-2 py-1 text-xs text-muted-foreground">なし</div>}
+              {pinned.length === 0 && <div className="px-2 py-1 text-xs text-muted-foreground">{messages.sidebar.empty}</div>}
             </div>
           </div>
 
@@ -166,10 +172,10 @@ export function Sidebar(props: SidebarProps) {
                 type="button"
                 className="flex items-center gap-2 hover:text-foreground transition-colors"
                 onClick={() => setIsRecentOpen((prev) => !prev)}
-                title={isRecentOpen ? "Recent を折りたたむ" : "Recent を展開"}
+                title={isRecentOpen ? messages.sidebar.recentCollapse : messages.sidebar.recentExpand}
               >
                 {isRecentOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-                <Clock className="w-3 h-3" /> Recent
+                <Clock className="w-3 h-3" /> {messages.sidebar.recent}
               </button>
               <span className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{recent.length}</span>
             </h4>
@@ -192,7 +198,7 @@ export function Sidebar(props: SidebarProps) {
                     </span>
                   </Button>
                 ))}
-                {recent.length === 0 && <div className="px-2 py-1 text-xs text-muted-foreground">なし</div>}
+                {recent.length === 0 && <div className="px-2 py-1 text-xs text-muted-foreground">{messages.sidebar.empty}</div>}
               </div>
             )}
           </div>
@@ -201,7 +207,7 @@ export function Sidebar(props: SidebarProps) {
               <Separator />
               <div>
                 <h4 className="mb-2 px-2 text-xs font-semibold tracking-tight text-muted-foreground flex items-center justify-between">
-                  <span>Search Results</span>
+                  <span>{messages.sidebar.searchResults}</span>
                   <span className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{searchResults.length}</span>
                 </h4>
                 <div className="grid gap-1">
@@ -215,9 +221,9 @@ export function Sidebar(props: SidebarProps) {
                           : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                       }`}
                       onClick={() => onOpenNote(r.path, r)}
-                      title={`${r.path}:${r.line}`}
+                      title={messages.sidebar.lineHit(r.line, r.text)}
                     >
-                      L{r.line}: {r.text}
+                      {messages.sidebar.lineHit(r.line, r.text)}
                     </button>
                   ))}
                 </div>
@@ -239,9 +245,9 @@ export function Sidebar(props: SidebarProps) {
           <Settings className="w-4 h-4 shrink-0" />
           <span
             className={`inline-block size-2 shrink-0 rounded-full ${
-              status === "Saved"
+              status === messages.status.saved
                 ? "bg-emerald-500"
-                : status === "Saving..."
+                : status === messages.status.saving
                   ? "bg-amber-500"
                   : status.includes("失敗") || status === INBOX_EXCLUSIVE_MESSAGE
                     ? "bg-red-500"

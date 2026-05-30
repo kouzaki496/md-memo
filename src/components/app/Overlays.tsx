@@ -1,5 +1,7 @@
 import type { NoteMeta } from "@/types/note";
 import { getMarkdownBody } from "@/lib/noteTags";
+import { isSystemNotePath } from "@/lib/systemNotes";
+import { messages } from "@/lib/messages";
 
 type ContextMenuState = {
   note: NoteMeta;
@@ -25,6 +27,9 @@ type OverlaysProps = {
 export function Overlays(props: OverlaysProps) {
   const { contextMenu, hoverPreview, onPinOrUnpin, onDelete } = props;
   const hoverPreviewBody = hoverPreview ? getMarkdownBody(hoverPreview.content) : "";
+  const isSystemNote = contextMenu
+    ? contextMenu.note.systemNote || isSystemNotePath(contextMenu.note.path)
+    : false;
 
   return (
     <>
@@ -34,20 +39,26 @@ export function Overlays(props: OverlaysProps) {
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onClick={(e) => e.stopPropagation()}
         >
-          <button
-            type="button"
-            className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-muted"
-            onClick={() => onPinOrUnpin(contextMenu.note)}
-          >
-            {contextMenu.note.pinned ? "ピン止め解除" : "ピン止め"}
-          </button>
-          <button
-            type="button"
-            className="block w-full rounded px-3 py-2 text-left text-sm text-red-600 hover:bg-muted"
-            onClick={() => onDelete(contextMenu.note)}
-          >
-            削除
-          </button>
+          {isSystemNote ? (
+            <div className="px-3 py-2 text-sm text-muted-foreground">{messages.tags.builtinNote}</div>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-muted"
+                onClick={() => onPinOrUnpin(contextMenu.note)}
+              >
+                {contextMenu.note.pinned ? messages.contextMenu.unpin : messages.contextMenu.pin}
+              </button>
+              <button
+                type="button"
+                className="block w-full rounded px-3 py-2 text-left text-sm text-red-600 hover:bg-muted"
+                onClick={() => onDelete(contextMenu.note)}
+              >
+                {messages.contextMenu.delete}
+              </button>
+            </>
+          )}
         </div>
       )}
 
@@ -59,8 +70,8 @@ export function Overlays(props: OverlaysProps) {
           <div className="mb-1 text-xs font-semibold text-foreground">{hoverPreview.note.title}</div>
           <div className="max-h-40 overflow-hidden whitespace-pre-wrap text-xs text-muted-foreground">
             {hoverPreview.loading
-              ? "読み込み中..."
-              : hoverPreviewBody.split("\n").slice(0, 8).join("\n") || "(空のメモ)"}
+              ? messages.overlay.loading
+              : hoverPreviewBody.split("\n").slice(0, 8).join("\n") || messages.manager.emptyPreview}
           </div>
         </div>
       )}

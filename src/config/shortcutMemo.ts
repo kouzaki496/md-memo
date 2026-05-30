@@ -1,5 +1,10 @@
 import { editorShortcutConfig } from "@/config/editorShortcuts";
 
+import {
+  BUILTIN_TAGS_SHORTCUTS,
+  formatBuiltinTagsLine,
+} from "@/lib/reservedTags";
+
 function fmtShortcut(key: string): string {
   return `Ctrl/Cmd + ${key.toUpperCase()}`;
 }
@@ -13,9 +18,12 @@ export function buildShortcutMemoContent(): string {
     .map((k) => (k === "plain" ? "プレーン" : k === "unordered" ? "箇条書き" : k === "ordered" ? "番号付き" : "タスク"))
     .join(" -> ");
 
-  return `# エディタショートカット
+  return `---
+${formatBuiltinTagsLine(BUILTIN_TAGS_SHORTCUTS)}
+---
+# エディタショートカット
 
-このメモはショートカット設定から自動生成されます。
+このメモはアプリ起動時に内容が自動更新されます（閲覧専用）。
 
 ## 文字サイズ
 - \`${fmtShortcut(editorShortcutConfig.zoomIn.key)}\` / \`${fmtShortcut(editorShortcutConfig.zoomInAlt.key)}\`: 拡大
@@ -42,6 +50,6 @@ ${headingKeys}
 - \`Alt + Shift + ↑\` / \`Alt + Shift + ↓\`: カーソル行または選択範囲に含まれる**行全体のブロック**を直上・直下へ複製
 
 ---
-設定定義: \`src/config/editorShortcuts.ts\`
+内容はアプリのショートカット設定に合わせて自動更新されます。
 `;
 }

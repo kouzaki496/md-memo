@@ -2,31 +2,59 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { AppConfig } from "@/types/config";
-import { DEFAULT_NEW_NOTE_TAG, isInboxTagName } from "@/lib/noteTags";
+import type { NoteMeta } from "@/types/note";
+import {
+  DEFAULT_NEW_NOTE_TAG,
+  countNotesWithTag,
+  ensureLockedInboxInTemplateTags,
+  isInboxTagName,
+} from "@/lib/noteTags";
+import { BUILTIN_RESERVED_TAG, isBuiltinReservedTagName } from "@/lib/reservedTags";
+import { messages } from "@/lib/messages";
 
 type SettingsPanelProps = {
   config: AppConfig;
+  templateTags: string[];
+  orphanTags: string[];
+  notes: NoteMeta[];
+  reservedTagsInUse: string[];
   isSaving: boolean;
   /** ディスクに保存済みの内容と差分がある */
   hasUnsavedChanges: boolean;
   onChangeConfig: (next: AppConfig) => void;
   onSave: () => void;
   onClose: () => void;
-  /** 全メモのフロントマター tags とテンプレートタグの一括置換 */
   onReplaceTagGlobally: (from: string, to: string) => Promise<void>;
+  onAddOrphanToTemplate: (tag: string) => void;
+  onRemoveTagFromAllMemos: (tag: string) => Promise<void>;
 };
 
 export function SettingsPanel(props: SettingsPanelProps) {
-  const { config, isSaving, hasUnsavedChanges, onChangeConfig, onSave, onClose, onReplaceTagGlobally } = props;
+  const {
+    config,
+    templateTags,
+    orphanTags,
+    notes,
+    reservedTagsInUse,
+    isSaving,
+    hasUnsavedChanges,
+    onChangeConfig,
+    onSave,
+    onClose,
+    onReplaceTagGlobally,
+    onAddOrphanToTemplate,
+    onRemoveTagFromAllMemos,
+  } = props;
   const [tagDraft, setTagDraft] = useState("");
   const [replaceFrom, setReplaceFrom] = useState("");
   const [replaceTo, setReplaceTo] = useState("");
   const [replaceBusy, setReplaceBusy] = useState(false);
+  const [orphanBusy, setOrphanBusy] = useState<string | null>(null);
 
   const addTag = () => {
     const normalized = tagDraft.trim().replace(/^#+/, "");
     if (!normalized) return;
-    if (isInboxTagName(normalized)) {
+    if (isInboxTagName(normalized) || isBuiltinReservedTagName(normalized)) {
       setTagDraft("");
       return;
     }
@@ -34,14 +62,24 @@ export function SettingsPanel(props: SettingsPanelProps) {
       setTagDraft("");
       return;
     }
-    onChangeConfig({ ...config, templateTags: [...config.templateTags, normalized] });
+    onChangeConfig({
+      ...config,
+      templateTags: ensureLockedInboxInTemplateTags([...config.templateTags, normalized]),
+    });
     setTagDraft("");
   };
 
   const removeTag = (tag: string) => {
-    if (isInboxTagName(tag)) return;
-    onChangeConfig({ ...config, templateTags: config.templateTags.filter((t) => t !== tag) });
+    if (isInboxTagName(tag) || isBuiltinReservedTagName(tag)) return;
+    onChangeConfig({
+      ...config,
+      templateTags: config.templateTags.filter((t) => t !== tag),
+    });
   };
+
+  const editableTags = templateTags.filter(
+    (tag) => !isInboxTagName(tag) && !isBuiltinReservedTagName(tag)
+  );
 
   return (
     <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
@@ -49,7 +87,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
         <span>設定</span>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={onClose}>
-            閉じる
+            {messages.manager.close}
           </Button>
           <Button
             size="sm"
@@ -62,7 +100,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
             onClick={onSave}
             disabled={isSaving || !hasUnsavedChanges}
           >
-            {isSaving ? "保存中..." : "保存"}
+            {isSaving ? messages.status.saving : "保存"}
           </Button>
         </div>
       </div>
@@ -72,7 +110,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
           className="border-b border-amber-500/40 bg-amber-500/12 px-4 py-2 text-sm text-amber-950 dark:text-amber-100"
           role="status"
         >
-          変更が保存されていません。「保存」を押すと config.json に書き込まれます。
+          {messages.settings.unsaved}
         </div>
       )}
 
@@ -82,8 +120,9 @@ export function SettingsPanel(props: SettingsPanelProps) {
           <Input
             value={config.notesDir}
             onChange={(e) => onChangeConfig({ ...config, notesDir: e.target.value })}
-            placeholder="例: zen-memo-notes または C:\\Users\\...\\notes"
+            placeholder={messages.settings.notesDirPlaceholder}
           />
+          <p className="text-xs text-muted-foreground">{messages.settings.notesDirHint}</p>
         </section>
 
         <section className="space-y-2">
@@ -97,7 +136,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
                 onChange={() => onChangeConfig({ ...config, themeMode: "system" })}
                 className="h-4 w-4 border-border accent-primary"
               />
-              システム（ライト）
+              {messages.settings.themeSystem}
             </label>
             <label className="flex items-center gap-2">
               <input
@@ -158,16 +197,33 @@ export function SettingsPanel(props: SettingsPanelProps) {
           </div>
         </section>
 
-        <section className="space-y-2">
-          <h3 className="text-sm font-semibold">テンプレートタグ</h3>
-          <p className="text-xs text-muted-foreground">
-            「{DEFAULT_NEW_NOTE_TAG}」は受信箱用に固定され、削除・重複追加はできません。
-          </p>
+        <section className="space-y-3">
+          <div>
+            <h3 className="text-sm font-semibold">{messages.settings.tagListTitle}</h3>
+            <p className="mt-1 text-xs text-muted-foreground">{messages.settings.tagListHint}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <span
+              className="rounded-md border border-border bg-muted/50 px-2 py-1 text-xs text-muted-foreground"
+              title={messages.tags.inboxLabel}
+            >
+              #{DEFAULT_NEW_NOTE_TAG}
+            </span>
+            {(reservedTagsInUse.length > 0 ? reservedTagsInUse : [BUILTIN_RESERVED_TAG]).map((tag) => (
+              <span
+                key={tag}
+                className="rounded-md border border-border bg-muted/50 px-2 py-1 text-xs text-muted-foreground"
+                title={messages.tags.builtinLabel}
+              >
+                #{tag}
+              </span>
+            ))}
+          </div>
           <div className="flex gap-2">
             <Input
               value={tagDraft}
               onChange={(e) => setTagDraft(e.target.value)}
-              placeholder="例: meeting"
+              placeholder={messages.settings.tagAddPlaceholder}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
@@ -180,63 +236,99 @@ export function SettingsPanel(props: SettingsPanelProps) {
             </Button>
           </div>
           <div className="flex flex-wrap gap-2">
-            {config.templateTags.map((tag) =>
-              isInboxTagName(tag) ? (
-                <span
-                  key={tag}
-                  className="rounded-md border border-border bg-muted/50 px-2 py-1 text-xs text-muted-foreground"
-                  title="受信箱タグ（固定）"
-                >
-                  #{tag}
-                </span>
-              ) : (
-                <button
-                  key={tag}
-                  type="button"
-                  className="rounded-md border border-border bg-muted px-2 py-1 text-xs hover:bg-muted/70"
-                  onClick={() => removeTag(tag)}
-                  title="クリックで削除"
-                >
-                  #{tag} ×
-                </button>
-              )
-            )}
-            {config.templateTags.length === 0 && (
-              <div className="text-xs text-muted-foreground">タグがありません</div>
+            {editableTags.map((tag) => (
+              <button
+                key={tag}
+                type="button"
+                className="rounded-md border border-border bg-muted px-2 py-1 text-xs hover:bg-muted/70"
+                onClick={() => removeTag(tag)}
+                title={messages.settings.tagRemoveHint}
+              >
+                #{tag} ×
+              </button>
+            ))}
+            {editableTags.length === 0 && (
+              <div className="text-xs text-muted-foreground">{messages.settings.tagEmpty}</div>
             )}
           </div>
         </section>
 
+        {orphanTags.length > 0 && (
+          <section className="space-y-3 border-t border-border pt-5">
+            <div>
+              <h3 className="text-sm font-semibold">{messages.settings.orphanTitle}</h3>
+              <p className="mt-1 text-xs text-muted-foreground">{messages.settings.orphanHint}</p>
+            </div>
+            <div className="space-y-2">
+              {orphanTags.map((tag) => {
+                const count = countNotesWithTag(notes, tag);
+                const busy = orphanBusy === tag;
+                return (
+                  <div
+                    key={tag}
+                    className="flex flex-wrap items-center gap-2 rounded-md border border-dashed border-border/80 bg-muted/20 px-3 py-2"
+                  >
+                    <span className="text-sm font-medium">
+                      #{tag}
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">
+                        {messages.settings.orphanCount(count)}
+                      </span>
+                    </span>
+                    <div className="ml-auto flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => onAddOrphanToTemplate(tag)}
+                      >
+                        {messages.settings.orphanAdd}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => {
+                          setOrphanBusy(tag);
+                          void onRemoveTagFromAllMemos(tag).finally(() => setOrphanBusy(null));
+                        }}
+                      >
+                        {messages.settings.orphanRemove}
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
         <section className="space-y-2 border-t border-border pt-5">
-          <h3 className="text-sm font-semibold">タグの一括置換</h3>
-          <p className="text-xs text-muted-foreground">
-            メモ保存先のすべての <code className="rounded bg-muted px-1">.md</code> の先頭 YAML{" "}
-            <code className="rounded bg-muted px-1">tags:</code> 行だけを対象にします。タグ名の大文字小文字は同一視します。
-            置換後は inbox 以外が残る場合は inbox は外れます（エディタのタグ操作と同じルール）。テンプレートタグ一覧に同じ名前があれば{" "}
-            <code className="rounded bg-muted px-1">config.json</code> も更新されます。
-          </p>
+          <h3 className="text-sm font-semibold">{messages.settings.replaceTitle}</h3>
+          <p className="text-xs text-muted-foreground">{messages.settings.replaceHint}</p>
           <div className="flex flex-wrap items-end gap-2">
             <div className="flex min-w-[120px] flex-1 flex-col gap-1">
               <label className="text-xs text-muted-foreground" htmlFor="tag-replace-from">
-                置換元
+                {messages.settings.replaceFrom}
               </label>
               <Input
                 id="tag-replace-from"
                 value={replaceFrom}
                 onChange={(e) => setReplaceFrom(e.target.value)}
-                placeholder="例: educ."
+                placeholder={messages.settings.replaceFromPlaceholder}
                 disabled={replaceBusy}
               />
             </div>
             <div className="flex min-w-[120px] flex-1 flex-col gap-1">
               <label className="text-xs text-muted-foreground" htmlFor="tag-replace-to">
-                置換先
+                {messages.settings.replaceTo}
               </label>
               <Input
                 id="tag-replace-to"
                 value={replaceTo}
                 onChange={(e) => setReplaceTo(e.target.value)}
-                placeholder="例: 教育"
+                placeholder={messages.settings.replaceToPlaceholder}
                 disabled={replaceBusy}
               />
             </div>
@@ -247,16 +339,17 @@ export function SettingsPanel(props: SettingsPanelProps) {
                 replaceBusy ||
                 !replaceFrom.trim() ||
                 !replaceTo.trim() ||
-                replaceFrom.trim().toLowerCase() === replaceTo.trim().toLowerCase()
+                replaceFrom.trim().toLowerCase() === replaceTo.trim().toLowerCase() ||
+                isBuiltinReservedTagName(replaceFrom) ||
+                isBuiltinReservedTagName(replaceTo)
               }
               onClick={() => {
                 const from = replaceFrom.trim();
                 const to = replaceTo.trim();
                 if (!from || !to) return;
                 if (from.toLowerCase() === to.toLowerCase()) return;
-                const ok = window.confirm(
-                  `すべてのメモの tags に含まれる「${from}」を「${to}」に置き換えます（大文字小文字は同一視）。テンプレートに同じ名前があれば config も更新します。実行しますか？`
-                );
+                if (isBuiltinReservedTagName(from) || isBuiltinReservedTagName(to)) return;
+                const ok = window.confirm(messages.confirm.replaceTagGlobally(from, to));
                 if (!ok) return;
                 setReplaceBusy(true);
                 void onReplaceTagGlobally(from, to)
@@ -264,16 +357,10 @@ export function SettingsPanel(props: SettingsPanelProps) {
                     setReplaceFrom("");
                     setReplaceTo("");
                   })
-                  .catch((err: unknown) => {
-                    console.error(err);
-                    window.alert(err instanceof Error ? err.message : String(err));
-                  })
-                  .finally(() => {
-                    setReplaceBusy(false);
-                  });
+                  .finally(() => setReplaceBusy(false));
               }}
             >
-              {replaceBusy ? "実行中…" : "全メモに適用"}
+              {messages.settings.replaceButton}
             </Button>
           </div>
         </section>
@@ -281,4 +368,3 @@ export function SettingsPanel(props: SettingsPanelProps) {
     </main>
   );
 }
-

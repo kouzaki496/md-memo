@@ -13,12 +13,17 @@ import { useNotesData } from "@/hooks/useNotesData";
 import { useHoverPreview } from "@/hooks/useHoverPreview";
 import {
   DEFAULT_NEW_NOTE_TAG,
+  collectTagsFromNotes,
   dedupeTagsCaseInsensitive,
   ensureLockedInboxInTemplateTags,
-  getInboxAddBlockedMessage,
+  getOrphanTags,
+  getTagToggleBlockedMessage,
   replaceTagTokenInList,
   toggleTagInContent,
 } from "@/lib/noteTags";
+import { isBuiltinReservedTagName } from "@/lib/reservedTags";
+import { isSystemNotePath } from "@/lib/systemNotes";
+import { messages } from "@/lib/messages";
 import "./App.css";
 
 type ContextMenuState = {
@@ -62,6 +67,7 @@ function App() {
     maxChars,
     setMaxChars,
     selectedPaths,
+    notes,
     pinned,
     recent,
     filteredDetails,
@@ -196,6 +202,31 @@ function App() {
     return () => media.removeEventListener("change", onChange);
   }, [configDraft?.themeMode]);
 
+  const tagsInUse = useMemo(() => collectTagsFromNotes(notes), [notes]);
+
+  const templateTags = useMemo(
+    () => ensureLockedInboxInTemplateTags(configDraft?.templateTags ?? []),
+    [configDraft?.templateTags]
+  );
+
+  const orphanTags = useMemo(
+    () => (configDraft ? getOrphanTags(configDraft.templateTags, tagsInUse) : []),
+    [configDraft, tagsInUse]
+  );
+
+  const reservedTagsInUse = useMemo(
+    () => tagsInUse.filter((tag) => isBuiltinReservedTagName(tag)),
+    [tagsInUse]
+  );
+
+  const isCurrentSystemNote = isSystemNotePath(currentPath);
+
+  useEffect(() => {
+    if (isCurrentSystemNote && isEditMode) {
+      setIsEditMode(false);
+    }
+  }, [isCurrentSystemNote, isEditMode]);
+
   useEffect(() => {
     if (saveTimerRef.current != null) {
       window.clearTimeout(saveTimerRef.current);
@@ -203,21 +234,24 @@ function App() {
     if (!isEditMode) {
       return;
     }
+    if (isCurrentSystemNote) {
+      return;
+    }
     if (!input) {
       return;
     }
 
     saveTimerRef.current = window.setTimeout(() => {
-      setStatus("Saving...");
+      setStatus(messages.status.saving);
       void invoke<string>("save_note", { content: input, currentPath: currentPath ?? undefined })
         .then((savedPath) => {
           setCurrentPath(savedPath);
-          setStatus("Saved");
+          setStatus(messages.status.saved);
           return loadNotes();
         })
         .catch((err) => {
           console.error(err);
-          setStatus("保存に失敗しました");
+          setStatus(messages.status.saveFailed);
         });
     }, 500);
 
@@ -226,7 +260,7 @@ function App() {
         window.clearTimeout(saveTimerRef.current);
       }
     };
-  }, [input, currentPath, isEditMode]);
+  }, [input, currentPath, isEditMode, isCurrentSystemNote]);
 
   const createNew = () => {
     setInput(toggleTagInContent("", DEFAULT_NEW_NOTE_TAG));
@@ -235,7 +269,7 @@ function App() {
     setIsEditMode(true);
     setIsManageMode(false);
     setIsSettingsMode(false);
-    setStatus("Ready");
+    setStatus(messages.status.ready);
   };
 
   const openNote = async (path: string, hit?: SearchHit) => {
@@ -247,28 +281,32 @@ function App() {
       setIsEditMode(false);
       setIsManageMode(false);
       setIsSettingsMode(false);
-      setStatus("Loaded");
+      setStatus(messages.status.loaded);
     } catch (err) {
       console.error(err);
       const msg = err instanceof Error ? err.message : String(err);
-      setStatus(`メモを開けませんでした: ${msg}`);
+      setStatus(messages.status.openNoteFailed(msg));
       await loadNotes();
     }
   };
 
   const enterEditMode = () => {
+    if (isSystemNotePath(currentPath)) {
+      setStatus(messages.status.builtinReadOnly);
+      return;
+    }
     setIsEditMode(true);
     setIsManageMode(false);
     setIsSettingsMode(false);
     setActiveHit(null); // 編集開始時は検索ハイライトを消す
-    setStatus("Edit mode");
+    setStatus(messages.status.editMode);
   };
 
   const enterPreviewMode = () => {
     setIsEditMode(false);
     setIsManageMode(false);
     setIsSettingsMode(false);
-    setStatus("Preview mode");
+    setStatus(messages.status.previewMode);
   };
 
   const openSettings = async () => {
@@ -276,10 +314,10 @@ function App() {
     setIsManageMode(false);
     try {
       await loadConfig();
-      setStatus("Settings");
+      setStatus(messages.status.settings);
     } catch (err) {
       console.error(err);
-      setStatus("設定の読み込みに失敗しました");
+      setStatus(messages.status.settingsLoadFailed);
     }
   };
 
@@ -297,10 +335,10 @@ function App() {
       setConfigDraft(payload);
       setSavedSettingsSnapshot(JSON.stringify(payload));
       await Promise.all([loadNotes(), loadNoteDetails()]);
-      setStatus("設定を保存しました");
+      setStatus(messages.status.settingsSaved);
     } catch (err) {
       console.error(err);
-      setStatus("設定の保存に失敗しました");
+      setStatus(messages.status.settingsSaveFailed);
     } finally {
       setIsSavingConfig(false);
     }
@@ -326,12 +364,43 @@ function App() {
         ),
       });
     }
-    setStatus(`タグを置換しました（メモ ${res.filesChanged} 件を更新）`);
+    setStatus(messages.status.tagReplaced(res.filesChanged));
+  };
+
+  const addOrphanToTemplate = (tag: string) => {
+    if (!configDraft) return;
+    if (configDraft.templateTags.some((t) => t.toLowerCase() === tag.toLowerCase())) return;
+    setConfigDraft({
+      ...configDraft,
+      templateTags: ensureLockedInboxInTemplateTags([...configDraft.templateTags, tag]),
+    });
+  };
+
+  const removeTagFromAllMemos = async (tag: string) => {
+    const ok = window.confirm(messages.confirm.removeTagGlobally(tag));
+    if (!ok) return;
+    const res = await invoke<ReplaceTagGloballyResult>("remove_tag_globally", { tag });
+    if (configDraft) {
+      const nextConfig = {
+        ...configDraft,
+        templateTags: ensureLockedInboxInTemplateTags(res.templateTags),
+      };
+      setConfigDraft(nextConfig);
+      if (!isSettingsDirty) {
+        setSavedSettingsSnapshot(JSON.stringify(nextConfig));
+      }
+    }
+    await Promise.all([loadNotes(), loadNoteDetails()]);
+    if (currentPath && res.changedPaths.some((p) => p === currentPath)) {
+      const content = await invoke<string>("read_note", { path: currentPath });
+      setInput(content);
+    }
+    setStatus(messages.status.tagRemoved(tag, res.filesChanged));
   };
 
   const closeSettings = () => {
     if (isSettingsDirty) {
-      const ok = window.confirm("設定に未保存の変更があります。保存せず閉じますか？");
+      const ok = window.confirm(messages.confirm.settingsDiscard);
       if (!ok) return;
     }
     if (savedSettingsSnapshot) {
@@ -354,7 +423,7 @@ function App() {
 
   const toggleTemplateTag = (rawTag: string) => {
     setInput((prev) => {
-      const blocked = getInboxAddBlockedMessage(prev, rawTag);
+      const blocked = getTagToggleBlockedMessage(prev, rawTag);
       if (blocked) {
         queueMicrotask(() => setStatus(blocked));
         return prev;
@@ -370,14 +439,24 @@ function App() {
   };
 
   const pinOrUnpinNote = async (note: NoteMeta) => {
+    if (note.pinned && (note.systemNote || isSystemNotePath(note.path))) {
+      setContextMenu(null);
+      setStatus(messages.status.builtinNoUnpin);
+      return;
+    }
     await invoke("toggle_pin_note", { path: note.path, pinned: !note.pinned });
     await Promise.all([loadNotes(), loadNoteDetails()]);
     setContextMenu(null);
-    setStatus(note.pinned ? "Unpinned" : "Pinned");
+    setStatus(note.pinned ? messages.status.unpinned : messages.status.pinned);
   };
 
   const deleteNote = async (note: NoteMeta) => {
-    const ok = window.confirm(`「${note.title}」を削除しますか？`);
+    if (note.systemNote || isSystemNotePath(note.path)) {
+      setContextMenu(null);
+      setStatus(messages.status.builtinNoDelete);
+      return;
+    }
+    const ok = window.confirm(messages.confirm.deleteNote(note.title));
     if (!ok) return;
     await invoke("delete_note", { path: note.path });
     if (currentPath === note.path) {
@@ -388,14 +467,22 @@ function App() {
     }
     await Promise.all([loadNotes(), loadNoteDetails()]);
     setContextMenu(null);
-    setStatus("Deleted");
+    setStatus(messages.status.deleted);
   };
 
   const deleteCurrentNote = () => {
     if (!currentPath) return;
     const fromList =
       pinned.find((n) => n.path === currentPath) ?? recent.find((n) => n.path === currentPath);
-    const meta: NoteMeta = fromList ?? { path: currentPath, title: currentFileName, pinned: false, tags: [] };
+    const meta: NoteMeta =
+      fromList ??
+      {
+        path: currentPath,
+        title: currentFileName,
+        pinned: false,
+        systemNote: isSystemNotePath(currentPath),
+        tags: [],
+      };
     void deleteNote(meta);
   };
 
@@ -544,6 +631,10 @@ function App() {
         {isSettingsMode && configDraft ? (
           <SettingsPanel
             config={configDraft}
+            templateTags={templateTags}
+            orphanTags={orphanTags}
+            notes={notes}
+            reservedTagsInUse={reservedTagsInUse}
             isSaving={isSavingConfig}
             hasUnsavedChanges={isSettingsDirty}
             onChangeConfig={(next) => {
@@ -554,6 +645,8 @@ function App() {
             onSave={() => void saveSettings()}
             onClose={closeSettings}
             onReplaceTagGlobally={(from, to) => replaceTagGlobally(from, to)}
+            onAddOrphanToTemplate={addOrphanToTemplate}
+            onRemoveTagFromAllMemos={(tag) => removeTagFromAllMemos(tag)}
           />
         ) : isManageMode ? (
           <ManagerPanel
@@ -577,13 +670,14 @@ function App() {
         ) : (
           <ReadingEditorPane
             isEditMode={isEditMode}
+            isReadOnly={isCurrentSystemNote}
             currentPath={currentPath}
             currentFileName={currentFileName}
             input={input}
             previewWidth={previewWidth}
             editorScale={editorScale}
             previewScale={previewScale}
-            templateTags={configDraft?.templateTags ?? []}
+            templateTags={templateTags}
             onEnterEditMode={enterEditMode}
             onEnterPreviewMode={enterPreviewMode}
             onChangeInput={setInput}

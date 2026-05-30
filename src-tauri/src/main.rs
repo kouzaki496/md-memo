@@ -3,6 +3,7 @@
 
 mod config;
 mod notes;
+mod system_notes;
 
 fn main() {
     tauri::Builder::default()
@@ -16,6 +17,9 @@ fn main() {
             if let Err(e) = notes::ensure_editor_shortcuts_note(handle) {
                 eprintln!("ensure_editor_shortcuts_note: {e}");
             }
+            if let Err(e) = notes::ensure_markdown_reference_note(handle.clone()) {
+                eprintln!("ensure_markdown_reference_note: {e}");
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -28,7 +32,9 @@ fn main() {
             notes::toggle_pin_note,
             notes::save_note,
             notes::upsert_system_note,
+            notes::ensure_markdown_reference_note,
             notes::replace_tag_globally,
+            notes::remove_tag_globally,
             config::get_config,
             config::save_config,
         ])

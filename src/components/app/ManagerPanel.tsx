@@ -1,9 +1,11 @@
 import { type MouseEvent } from "react";
-import { Pin } from "lucide-react";
+import { Lock, Pin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { NoteDetail, NoteMeta } from "@/types/note";
+import { isSystemNotePath } from "@/lib/systemNotes";
+import { messages } from "@/lib/messages";
 
 type ManagerPanelProps = {
   managerQuery: string;
@@ -63,34 +65,34 @@ export function ManagerPanel(props: ManagerPanelProps) {
   return (
     <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
       <div className="h-12 border-b flex items-center justify-between px-4 text-xs font-medium text-muted-foreground uppercase tracking-wider bg-background/80">
-        <span>メモ一覧管理</span>
+        <span>{messages.manager.title}</span>
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="sm" onClick={onSelectAllFiltered}>
-            表示中を全選択
+            {messages.manager.selectAll}
           </Button>
           <Button variant="ghost" size="sm" onClick={onClearSelection}>
-            選択解除
+            {messages.manager.clearSelection}
           </Button>
           <Button variant="outline" size="sm" onClick={onClose}>
-            閉じる
+            {messages.manager.close}
           </Button>
         </div>
       </div>
       <div className="border-b p-3 flex items-center gap-2">
         <Input
-          placeholder="タイトル・内容で検索"
+          placeholder={messages.manager.searchPlaceholder}
           value={managerQuery}
           onChange={(e) => setManagerQuery(e.target.value)}
           className="max-w-sm"
         />
         <Input
-          placeholder="最大文字数 (例: 100)"
+          placeholder={messages.manager.maxCharsPlaceholder}
           value={maxChars}
           onChange={(e) => setMaxChars(e.target.value)}
           className="w-44"
         />
         <Button variant="destructive" size="sm" onClick={onDeleteSelected}>
-          選択削除 ({selectedCount})
+          {messages.manager.deleteSelected(selectedCount)}
         </Button>
       </div>
       <ScrollArea className="min-h-0 flex-1 overflow-hidden">
@@ -100,7 +102,13 @@ export function ManagerPanel(props: ManagerPanelProps) {
               key={n.path}
               className="flex items-start gap-3 rounded-md border bg-card p-3 hover:bg-muted/30"
               onMouseEnter={(e) =>
-                onOpenHoverPreview(e, { path: n.path, title: n.title, pinned: n.pinned, tags: n.tags })
+                onOpenHoverPreview(e, {
+                  path: n.path,
+                  title: n.title,
+                  pinned: n.pinned,
+                  systemNote: n.systemNote,
+                  tags: n.tags,
+                })
               }
               onMouseMove={onMoveHoverPreview}
               onMouseLeave={onCloseHoverPreview}
@@ -108,26 +116,33 @@ export function ManagerPanel(props: ManagerPanelProps) {
               <input
                 type="checkbox"
                 checked={selectedPaths.has(n.path)}
+                disabled={n.systemNote || isSystemNotePath(n.path)}
                 onChange={() => onToggleSelect(n.path)}
-                className="mt-1 h-5 w-5 cursor-pointer rounded border-border accent-primary"
+                className="mt-1 h-5 w-5 cursor-pointer rounded border-border accent-primary disabled:cursor-not-allowed disabled:opacity-40"
               />
               <div className="min-w-0 flex-1">
                 <button type="button" className="text-left w-full" onClick={() => onOpenNote(n.path)}>
                   <div className="truncate font-medium">
                     {n.title}
+                    {(n.systemNote || isSystemNotePath(n.path)) && (
+                      <Lock
+                        className="ml-1 inline-block h-3.5 w-3.5 align-text-top text-muted-foreground"
+                        aria-label={messages.aria.builtinNote}
+                      />
+                    )}
                     {n.pinned && <Pin className="ml-1 inline-block h-3.5 w-3.5 align-text-top text-muted-foreground" />}
                   </div>
                   {renderTags(n.tags)}
                   <div className="mt-1 text-xs text-muted-foreground">
-                    {n.charCount} 文字
-                    {n.preview ? ` / ${n.preview}` : " / (空のメモ)"}
+                    {messages.manager.charCount(n.charCount)}
+                    {n.preview ? ` / ${n.preview}` : ` / ${messages.manager.emptyPreview}`}
                   </div>
                 </button>
               </div>
             </div>
           ))}
           {filteredDetails.length === 0 && (
-            <div className="p-4 text-sm text-muted-foreground">条件に一致するメモはありません。</div>
+            <div className="p-4 text-sm text-muted-foreground">{messages.manager.empty}</div>
           )}
         </div>
       </ScrollArea>

@@ -2,6 +2,7 @@ export type NoteMeta = {
   path: string;
   title: string;
   pinned: boolean;
+  systemNote: boolean;
   tags: string[];
 };
 
@@ -15,6 +16,7 @@ export type NoteDetail = {
   path: string;
   title: string;
   pinned: boolean;
+  systemNote: boolean;
   tags: string[];
   charCount: number;
   updatedMs: number;

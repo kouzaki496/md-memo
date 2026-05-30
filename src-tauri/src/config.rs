@@ -37,6 +37,9 @@ pub struct AppConfig {
     pub theme_mode: String,
     #[serde(default = "default_theme_preset", alias = "theme_preset")]
     pub theme_preset: String,
+    /// 初回シード済みメモ（ファイル名）。削除後の再生成は行わない。
+    #[serde(default, alias = "seeded_notes")]
+    pub seeded_notes: Vec<String>,
     #[serde(default, alias = "darkMode", alias = "dark_mode", skip_serializing)]
     pub dark_mode_legacy: Option<bool>,
 }
@@ -49,6 +52,7 @@ impl Default for AppConfig {
             template_tags: default_template_tags(),
             theme_mode: "system".to_string(),
             theme_preset: "default".to_string(),
+            seeded_notes: Vec::new(),
             dark_mode_legacy: None,
         }
     }
