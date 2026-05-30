@@ -937,7 +937,9 @@ function App() {
     const textarea = editorRef.current;
     if (!textarea) return;
 
-    const targetLine = Math.max(1, activeHit.line);
+    if (activeHit.line <= 0) return;
+
+    const targetLine = activeHit.line;
     const lines = input.split("\n");
     const before = lines.slice(0, targetLine - 1).join("\n");
     const start = before.length + (targetLine > 1 ? 1 : 0);

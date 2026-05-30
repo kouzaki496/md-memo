@@ -31,26 +31,26 @@ fn main() {
                 if let Err(e) = notes::ensure_editor_shortcuts_note(handle) {
                     eprintln!("ensure_editor_shortcuts_note: {e}");
                 }
-                if let Err(e) = notes::ensure_markdown_reference_note(handle.clone()) {
+                if let Err(e) = notes::seeded::ensure_markdown_reference_note(handle.clone()) {
                     eprintln!("ensure_markdown_reference_note: {e}");
                 }
             }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            notes::search_notes,
-            notes::list_notes,
-            notes::list_notes_detail,
-            notes::read_note,
-            notes::delete_note,
-            notes::delete_notes,
-            notes::toggle_pin_note,
-            notes::save_note,
-            notes::open_note_window,
-            notes::upsert_system_note,
-            notes::ensure_markdown_reference_note,
-            notes::replace_tag_globally,
-            notes::remove_tag_globally,
+            notes::search::search_notes,
+            notes::crud::list_notes,
+            notes::crud::list_notes_detail,
+            notes::crud::read_note,
+            notes::crud::delete_note,
+            notes::crud::delete_notes,
+            notes::crud::toggle_pin_note,
+            notes::crud::save_note,
+            notes::window::open_note_window,
+            notes::seeded::upsert_system_note,
+            notes::seeded::ensure_markdown_reference_note,
+            notes::tag_global::replace_tag_globally,
+            notes::tag_global::remove_tag_globally,
             edit_lock::acquire_edit_lock,
             edit_lock::release_edit_lock,
             config::get_config,

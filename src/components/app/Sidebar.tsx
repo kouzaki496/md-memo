@@ -8,6 +8,7 @@ import type { PresentationStatus } from "@/types/presentation";
 import type { NoteMeta, SearchHit } from "@/types/note";
 import { INBOX_EXCLUSIVE_MESSAGE } from "@/lib/noteTags";
 import { messages } from "@/lib/messages";
+import { isTagSearchQuery } from "@/lib/tagSearch";
 import { cn } from "@/lib/utils";
 
 type SidebarProps = {
@@ -61,6 +62,7 @@ export function Sidebar(props: SidebarProps) {
     onReopenPresentationTab,
   } = props;
   const isSearching = query.trim().length > 0;
+  const isTagSearch = isTagSearchQuery(query);
   const [isRecentOpen, setIsRecentOpen] = useState(true);
   const prevIsSearchingRef = useRef(false);
 
@@ -227,32 +229,52 @@ export function Sidebar(props: SidebarProps) {
               </div>
             )}
           </div>
-          {searchResults.length > 0 && (
+          {isSearching && (
             <>
               <Separator />
               <div>
                 <h4 className="mb-2 px-2 text-xs font-semibold tracking-tight text-muted-foreground flex items-center justify-between">
-                  <span>{messages.sidebar.searchResults}</span>
-                  <span className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{searchResults.length}</span>
+                  <span>{isTagSearch ? messages.sidebar.searchResultsTags : messages.sidebar.searchResults}</span>
+                  {searchResults.length > 0 && (
+                    <span className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{searchResults.length}</span>
+                  )}
                 </h4>
-                <div className="grid gap-1">
-                  {searchResults.slice(0, 8).map((r) => (
-                    <button
-                      key={`${r.path}:${r.line}:${r.text}`}
-                      type="button"
-                      className={`px-2 py-1 text-left text-xs rounded-md truncate transition-colors ${
-                        activeHit && activeHit.path === r.path && activeHit.line === r.line && activeHit.text === r.text
-                          ? "bg-muted text-foreground shadow-sm"
-                          : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                      }`}
-                      onClick={() => onOpenNote(r.path, r)}
-                      onContextMenu={(e) => onOpenContextMenuForPath(e, r.path)}
-                      title={messages.sidebar.lineHit(r.line, r.text)}
-                    >
-                      {messages.sidebar.lineHit(r.line, r.text)}
-                    </button>
-                  ))}
-                </div>
+                {searchResults.length > 0 ? (
+                  <div className="grid gap-1">
+                    {searchResults.slice(0, 8).map((r) => {
+                      const fileName = r.path.split(/[/\\]/).pop() ?? r.path;
+                      const label = isTagSearch
+                        ? messages.sidebar.tagHit(fileName, r.text)
+                        : messages.sidebar.lineHit(r.line, r.text);
+                      const isActive = isTagSearch
+                        ? currentPath === r.path
+                        : Boolean(
+                            activeHit &&
+                              activeHit.path === r.path &&
+                              activeHit.line === r.line &&
+                              activeHit.text === r.text
+                          );
+                      return (
+                        <button
+                          key={`${r.path}:${r.line}:${r.text}`}
+                          type="button"
+                          className={`px-2 py-1 text-left text-xs rounded-md truncate transition-colors ${
+                            isActive
+                              ? "bg-muted text-foreground shadow-sm"
+                              : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                          }`}
+                          onClick={() => onOpenNote(r.path, isTagSearch ? undefined : r)}
+                          onContextMenu={(e) => onOpenContextMenuForPath(e, r.path)}
+                          title={label}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="px-2 py-1 text-xs text-muted-foreground">{messages.sidebar.searchNoResults}</div>
+                )}
               </div>
             </>
           )}

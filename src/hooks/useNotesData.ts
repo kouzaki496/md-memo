@@ -7,16 +7,6 @@ import { isSystemNoteFileName, isSystemNotePath } from "@/lib/systemNotes";
 import { formatAppError } from "@/lib/appError";
 import { messages } from "@/lib/messages";
 
-/** 語に大文字が含まれる場合は大小区別、それ以外は大小区別なし（Rust の search と同趣旨） */
-function fieldMatchesQuery(haystack: string, needle: string): boolean {
-  if (needle.length === 0) return true;
-  const caseSensitive = /[\p{Lu}]/u.test(needle);
-  if (caseSensitive) {
-    return haystack.includes(needle);
-  }
-  return haystack.toLowerCase().includes(needle.toLowerCase());
-}
-
 function isEditorShortcutsNote(n: NoteMeta): boolean {
   return isSystemNoteFileName(n.title);
 }
@@ -29,6 +19,7 @@ export function useNotesData(notesInitEnabled: boolean) {
   const [isManageMode, setIsManageMode] = useState(false);
   const [noteDetails, setNoteDetails] = useState<NoteDetail[]>([]);
   const [managerQuery, setManagerQuery] = useState("");
+  const [managerSearchPaths, setManagerSearchPaths] = useState<Set<string> | null>(null);
   const [maxChars, setMaxChars] = useState("");
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
 
@@ -47,13 +38,11 @@ export function useNotesData(notesInitEnabled: boolean) {
     return noteDetails.filter((n) => {
       const queryOk =
         q.length === 0 ||
-        fieldMatchesQuery(n.title, q) ||
-        fieldMatchesQuery(n.preview, q) ||
-        fieldMatchesQuery(n.path, q);
+        (managerSearchPaths !== null && managerSearchPaths.has(n.path));
       const lengthOk = !Number.isFinite(max) || max <= 0 || n.charCount <= max;
       return queryOk && lengthOk;
     });
-  }, [noteDetails, managerQuery, maxChars]);
+  }, [noteDetails, managerQuery, maxChars, managerSearchPaths]);
 
   const loadNotes = async () => {
     const list = await invoke<NoteMeta[]>("list_notes");
@@ -164,15 +153,46 @@ export function useNotesData(notesInitEnabled: boolean) {
       setSearchResults([]);
       return;
     }
-    const dirPath = notes.length > 0 ? notes[0].path.replace(/[\\/][^\\/]+$/, "") : "";
-    if (!dirPath) return;
-    void invoke<SearchHit[]>("search_notes", { query: q, dirPath })
-      .then(setSearchResults)
+    let cancelled = false;
+    void invoke<SearchHit[]>("search_notes", { query: q })
+      .then((hits) => {
+        if (!cancelled) setSearchResults(hits);
+      })
       .catch((err) => {
+        if (cancelled) return;
         console.error(err);
+        setSearchResults([]);
         setStatus(formatAppError(err));
       });
-  }, [query, notes]);
+    return () => {
+      cancelled = true;
+    };
+  }, [query]);
+
+  useEffect(() => {
+    const q = managerQuery.trim();
+    if (!q) {
+      setManagerSearchPaths(null);
+      return;
+    }
+    let cancelled = false;
+    setManagerSearchPaths(new Set());
+    void invoke<SearchHit[]>("search_notes", { query: q })
+      .then((hits) => {
+        if (!cancelled) {
+          setManagerSearchPaths(new Set(hits.map((h) => h.path)));
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error(err);
+        setManagerSearchPaths(new Set());
+        setStatus(formatAppError(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [managerQuery]);
 
   return {
     query,
