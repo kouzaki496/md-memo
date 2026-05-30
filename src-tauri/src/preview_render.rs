@@ -3,6 +3,9 @@
 use pulldown_cmark::{html, Options, Parser};
 use regex::Regex;
 use std::sync::LazyLock;
+use syntect::highlighting::ThemeSet;
+use syntect::html::highlighted_html_for_string;
+use syntect::parsing::SyntaxSet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CalloutKind {
@@ -58,6 +61,11 @@ static RE_ORDERED_LIST: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d+\.\s
 static RE_UNORDERED_LIST: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[-*+]\s").unwrap());
 static RE_TASK_LIST: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[-*+]\s\[[ xX]\]\s").unwrap());
+static RE_PRE_CODE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?s)<pre><code(?: class="language-([^"]*)")?>(.*?)</code></pre>"#).unwrap()
+});
+static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
 
 /// remark-breaks 相当: 段落内の単一改行を hard break にする（コードブロック内は除外）
 fn is_block_start(line: &str) -> bool {
@@ -259,6 +267,63 @@ pub fn render_note_body_html(body: &str) -> String {
     }
 }
 
+fn decode_html_entities(text: &str) -> String {
+    text.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+}
+
+fn pick_theme() -> syntect::highlighting::Theme {
+    let ts = &*THEME_SET;
+    for name in ["Visual Studio Dark+", "base16-ocean.dark", "InspiredGitHub"] {
+        if let Some(theme) = ts.themes.get(name) {
+            return theme.clone();
+        }
+    }
+    ts.themes
+        .values()
+        .next()
+        .cloned()
+        .expect("default syntax themes missing")
+}
+
+fn normalize_lang(lang: &str) -> String {
+    match lang.to_lowercase().as_str() {
+        "ts" => "typescript".to_string(),
+        "js" => "javascript".to_string(),
+        "py" => "python".to_string(),
+        "rb" => "ruby".to_string(),
+        "yml" => "yaml".to_string(),
+        "sh" | "shell" | "zsh" => "bash".to_string(),
+        "md" => "markdown".to_string(),
+        "rs" => "rust".to_string(),
+        "golang" => "go".to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// 提示 HTML 内の `<pre><code>` を syntect でハイライトする（常にダーク背景）。
+pub fn highlight_code_blocks_in_html(html: &str) -> String {
+    let theme = pick_theme();
+    RE_PRE_CODE
+        .replace_all(html, |caps: &regex::Captures| {
+            let lang = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            let code = decode_html_entities(&caps[2]);
+            let normalized = normalize_lang(lang);
+            let syntax = SYNTAX_SET
+                .find_syntax_by_token(&normalized)
+                .or_else(|| SYNTAX_SET.find_syntax_by_extension(&normalized))
+                .unwrap_or_else(|| SYNTAX_SET.find_syntax_plain_text());
+            match highlighted_html_for_string(&code, &SYNTAX_SET, syntax, &theme) {
+                Ok(highlighted) => format!(r#"<div class="md-code-block">{highlighted}</div>"#),
+                Err(_) => format!("<pre><code>{code}</code></pre>"),
+            }
+        })
+        .into_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -304,5 +369,13 @@ mod tests {
         let html = markdown_fragment_to_html(md);
         assert!(html.contains("<code") || html.contains("<pre"));
         assert!(html.contains("a\nb") || html.contains("a\r\nb") || (html.contains('a') && html.contains('b')));
+    }
+
+    #[test]
+    fn highlight_rust_code_block() {
+        let html = markdown_fragment_to_html("```rust\nfn main() {}\n```");
+        let highlighted = highlight_code_blocks_in_html(&html);
+        assert!(highlighted.contains("md-code-block"));
+        assert!(highlighted.contains("fn") && highlighted.contains("main"));
     }
 }

@@ -12,8 +12,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { openUrl } from "@tauri-apps/plugin-opener";
-import ReactMarkdown, { type Components } from "react-markdown";
+import ReactMarkdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import {
@@ -43,6 +42,7 @@ import {
 } from "@/lib/noteTags";
 import { isBuiltinReservedTagName } from "@/lib/reservedTags";
 import { messages } from "@/lib/messages";
+import { createMarkdownPreviewComponents } from "@/lib/markdownPreviewComponents";
 import {
   buildImageMarkdown,
   clipboardMayContainImage,
@@ -54,57 +54,12 @@ import {
   useTauriImageDrop,
 } from "@/lib/noteImages";
 import { cn } from "@/lib/utils";
-import { MarkdownPreviewImage } from "@/components/app/MarkdownPreviewImage";
 
 const toolbarBtn =
   "rounded-md border border-border bg-background shadow-sm hover:bg-muted/80 hover:text-foreground";
 
 const remarkPreviewPlugins = [remarkGfm, remarkBreaks];
-
-async function openLinkInSystemBrowser(href: string) {
-  try {
-    await openUrl(href);
-  } catch {
-    window.open(href, "_blank", "noopener,noreferrer");
-  }
-}
-
-/** http(s) / mailto / tel / プロトコル相対のみ外部で開く。相対パスは WebView 内遷移を防ぐだけ。 */
-function normalizeExternalBrowserHref(href: string): string | null {
-  const t = href.trim();
-  if (!t || t.startsWith("#")) return null;
-  if (/^javascript:/i.test(t)) return null;
-  if (/^https?:\/\//i.test(t)) return t;
-  if (/^mailto:/i.test(t) || /^tel:/i.test(t)) return t;
-  if (/^\/\//.test(t)) return `https:${t}`;
-  return null;
-}
-
-const markdownPreviewComponents: Partial<Components> = {
-  img({ src, alt, node: _n, ...props }) {
-    if (!src) return null;
-    return <MarkdownPreviewImage src={src} alt={alt} {...props} />;
-  },
-  a({ href, children, node: _n, ...props }) {
-    return (
-      <a
-        {...props}
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={(e) => {
-          if (!href) return;
-          if (href.trim().startsWith("#")) return;
-          e.preventDefault();
-          const url = normalizeExternalBrowserHref(href);
-          if (url) void openLinkInSystemBrowser(url);
-        }}
-      >
-        {children}
-      </a>
-    );
-  },
-};
+const markdownPreviewComponents = createMarkdownPreviewComponents();
 
 const TAGS_BAR_EXPANDED_KEY = "scriptax-editor-tags-bar-expanded";
 

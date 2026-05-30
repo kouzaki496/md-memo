@@ -2,6 +2,7 @@
 
 use crate::app_error::{self, err, io, with_detail};
 use crate::attachments;
+use crate::preview_render;
 use axum::{
     extract::{Path, State},
     http::{header, StatusCode},
@@ -72,6 +73,7 @@ pub struct StartPresentationResult {
 struct LiveSession {
     bound_path: Option<String>,
     file_name: String,
+    body_markdown: String,
     body_html: String,
     active: bool,
     realtime: bool,
@@ -100,6 +102,7 @@ struct PresentationInner {
     display_key: RwLock<Option<String>>,
     theme_mode: RwLock<String>,
     theme_preset: RwLock<String>,
+    theme_is_dark: RwLock<bool>,
     app_shutdown: RwLock<bool>,
     display_scroll_ratio: RwLock<f64>,
     notes_root: RwLock<Option<PathBuf>>,
@@ -122,6 +125,7 @@ fn presentation() -> &'static AppPresentation {
             display_key: RwLock::new(None),
             theme_mode: RwLock::new("system".to_string()),
             theme_preset: RwLock::new("default".to_string()),
+            theme_is_dark: RwLock::new(false),
             app_shutdown: RwLock::new(false),
             display_scroll_ratio: RwLock::new(0.0),
             notes_root: RwLock::new(None),
@@ -138,16 +142,22 @@ fn note_body_to_html(body: &str) -> String {
     crate::preview_render::render_note_body_html(body)
 }
 
-async fn note_body_to_viewer_html(body: &str, state: &AppPresentation) -> String {
+async fn build_viewer_html_from_markdown(body: &str, state: &AppPresentation) -> String {
     let html = note_body_to_html(body);
-    if !*state.0.server_started.lock().await {
-        return html;
-    }
-    let port = *state.0.port.lock().await;
-    let token = state.0.viewer_token.lock().await.clone();
-    let base = format!("http://127.0.0.1:{port}/view/{token}/attachments");
-    let notes_root = state.0.notes_root.read().await.clone();
-    attachments::rewrite_attachment_imgs_for_viewer(&html, &base, notes_root.as_deref())
+    let html = if *state.0.server_started.lock().await {
+        let port = *state.0.port.lock().await;
+        let token = state.0.viewer_token.lock().await.clone();
+        let base = format!("http://127.0.0.1:{port}/view/{token}/attachments");
+        let notes_root = state.0.notes_root.read().await.clone();
+        attachments::rewrite_attachment_imgs_for_viewer(&html, &base, notes_root.as_deref())
+    } else {
+        html
+    };
+    preview_render::highlight_code_blocks_in_html(&html)
+}
+
+async fn note_body_to_viewer_html(body: &str, state: &AppPresentation) -> String {
+    build_viewer_html_from_markdown(body, state).await
 }
 
 async fn cache_notes_root(state: &AppPresentation, app: &tauri::AppHandle) {
@@ -498,6 +508,11 @@ fn viewer_html(token: &str) -> String {
     .prose h1, .prose h2, .prose h3 {{ line-height: 1.25; margin-top: 1.5em; }}
     .prose pre {{ overflow-x: auto; padding: 0.75rem 1rem; border-radius: 0.375rem; background: color-mix(in oklab, var(--foreground) 8%, var(--background)); }}
     .prose code {{ font-family: ui-monospace, monospace; font-size: 0.9em; }}
+    .md-code-block {{ margin: 0.75rem 0; overflow-x: auto; border-radius: 0.375rem; background: #1e1e1e; color: #d4d4d4; }}
+    .md-code-block pre {{ margin: 0; padding: 0.85rem 1rem; overflow-x: auto; border-radius: 0.375rem; font-size: 0.875em; line-height: 1.6; background: #1e1e1e !important; color: #d4d4d4 !important; }}
+    .md-code-block code {{ font-family: ui-monospace, monospace; font-size: inherit; color: #d4d4d4 !important; background: transparent !important; border: none !important; padding: 0 !important; }}
+    .md-code-block :is(span, .token) {{ background: transparent !important; background-color: transparent !important; }}
+    .prose .md-code-block, .prose .md-code-block pre {{ color: #d4d4d4 !important; }}
     .prose table {{ border-collapse: collapse; width: 100%; }}
     .prose th, .prose td {{ border: 1px solid var(--border); padding: 0.35rem 0.6rem; }}
     .prose img {{ max-width: 100%; height: auto; border-radius: 0.375rem; margin: 0.75rem 0; }}
@@ -686,6 +701,7 @@ pub async fn start_presentation(
     let session = LiveSession {
         bound_path: bound_path.clone(),
         file_name: file_name.clone(),
+        body_markdown: body.clone(),
         body_html,
         active: true,
         realtime,
@@ -752,6 +768,7 @@ pub async fn push_presentation_update(
     if !session.active {
         return Err(err(app_error::PRESENTATION_ALREADY_ENDED));
     }
+    session.body_markdown = body.clone();
     session.body_html = note_body_to_viewer_html(&body, state).await;
     drop(sessions);
     emit_viewer_if_displayed(state, &key).await;
@@ -873,12 +890,17 @@ pub async fn set_presentation_scroll(
 }
 
 #[tauri::command]
-pub async fn set_presentation_theme(theme_mode: String, theme_preset: String) -> Result<(), String> {
+pub async fn set_presentation_theme(
+    theme_mode: String,
+    theme_preset: String,
+    theme_is_dark: bool,
+) -> Result<(), String> {
     validate_theme_mode(&theme_mode)?;
     validate_theme_preset(&theme_preset)?;
     let state = presentation();
     *state.0.theme_mode.write().await = theme_mode;
     *state.0.theme_preset.write().await = theme_preset;
+    *state.0.theme_is_dark.write().await = theme_is_dark;
     emit_viewer_snapshot(state).await;
     Ok(())
 }

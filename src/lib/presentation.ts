@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { resolveIsDark } from "@/lib/theme";
 import type { ThemeMode, ThemePreset } from "@/types/config";
 import type { PresentationStatus, StartPresentationResult } from "@/types/presentation";
 
@@ -24,7 +25,11 @@ export async function syncPresentationTheme(
   themeMode: ThemeMode,
   themePreset: ThemePreset
 ): Promise<void> {
-  await invoke("set_presentation_theme", { themeMode, themePreset });
+  await invoke("set_presentation_theme", {
+    themeMode,
+    themePreset,
+    themeIsDark: resolveIsDark(themeMode),
+  });
 }
 
 export async function startPresentation(args: {
