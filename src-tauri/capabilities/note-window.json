@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "note-window",
+  "description": "Capability for per-note windows",
+  "windows": ["note-*"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-close",
+    "core:event:allow-listen",
+    "core:event:allow-emit",
+    "opener:default"
+  ]
+}

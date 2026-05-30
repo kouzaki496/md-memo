@@ -24,8 +24,10 @@ import {
   Lightbulb,
   Lock,
   Minus,
+  Monitor,
   Pencil,
   Plus,
+  SquareArrowOutUpRight,
   Trash2,
   XCircle,
 } from "lucide-react";
@@ -130,6 +132,8 @@ type ReadingEditorPaneProps = {
   onResetEditorScale: () => void;
   onResetPreviewScale: () => void;
   onDeleteCurrentNote: () => void;
+  onOpenInNewWindow?: () => void;
+  onPresentInBrowser?: () => void;
   editorRef: RefObject<HTMLTextAreaElement | null>;
 };
 
@@ -436,6 +440,8 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
     onResetEditorScale,
     onResetPreviewScale,
     onDeleteCurrentNote,
+    onOpenInNewWindow,
+    onPresentInBrowser,
     editorRef,
   } = props;
 
@@ -1380,6 +1386,32 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
               >
                 <Plus className="h-4 w-4" />
               </Button>
+              {onOpenInNewWindow && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-sm"
+                  className={toolbarBtn}
+                  title={messages.editor.openInNewWindow}
+                  aria-label={messages.editor.openInNewWindow}
+                  onClick={onOpenInNewWindow}
+                >
+                  <SquareArrowOutUpRight className="h-4 w-4" />
+                </Button>
+              )}
+              {onPresentInBrowser && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-sm"
+                  className={toolbarBtn}
+                  title={messages.editor.presentInBrowser}
+                  aria-label={messages.editor.presentInBrowser}
+                  onClick={onPresentInBrowser}
+                >
+                  <Monitor className="h-4 w-4" />
+                </Button>
+              )}
               {!isReadOnly && (
                 <Button
                   type="button"
@@ -1455,6 +1487,32 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
           >
             <Plus className="h-4 w-4" />
           </Button>
+          {onOpenInNewWindow && (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              className={toolbarBtn}
+              title={messages.editor.openInNewWindow}
+              aria-label={messages.editor.openInNewWindow}
+              onClick={onOpenInNewWindow}
+            >
+              <SquareArrowOutUpRight className="h-4 w-4" />
+            </Button>
+          )}
+          {onPresentInBrowser && (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              className={toolbarBtn}
+              title={messages.editor.presentInBrowser}
+              aria-label={messages.editor.presentInBrowser}
+              onClick={onPresentInBrowser}
+            >
+              <Monitor className="h-4 w-4" />
+            </Button>
+          )}
           {!isReadOnly && (
             <>
               <Button

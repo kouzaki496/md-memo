@@ -107,10 +107,45 @@ export const messages = {
     zoomIn: "文字を大きく",
     deleteNote: "このメモを削除",
     deleteNoteDisabled: "未保存のメモは削除できません",
+    openInNewWindow: "別ウィンドウで開く",
+    presentInBrowser: "ブラウザで提示…",
     placeholder: "メモを入力…",
     tagsBar: "タグ",
     tagsNone: "（なし）",
     lineCount: (n: number) => `${n} 行`,
+  },
+
+  presentation: {
+    active: (fileName: string) => `提示中: ${fileName}`,
+    startDialogTitle: "ブラウザで提示",
+    startDialogBody: (fileName: string) =>
+      `「${fileName}」を別タブで提示します。他のメモは別タブで共有できます。`,
+    startConfirmButton: "提示を開始",
+    startCancel: "キャンセル",
+    realtimeLabel: "リアルタイム同期",
+    realtimeHint:
+      "オンにすると、提示中メモを編集した内容が自動でブラウザへ反映されます。オフのときは「ブラウザを更新」でのみ反映します。",
+    realtimeToggle: "リアルタイム",
+    realtimeOnBadge: "同期オン",
+    realtimeOffBadge: "同期オフ",
+    realtimeEnable: "リアルタイム同期をオンにする",
+    realtimeDisable: "リアルタイム同期をオフにする",
+    realtimeEnabled: "リアルタイム同期をオンにしました",
+    realtimeDisabled: "リアルタイム同期をオフにしました",
+    pushUpdate: "ブラウザを更新",
+    pushUpdateHint: "いまの提示内容をブラウザへ手動で反映します",
+    copyUrl: "URL をコピー",
+    end: "提示を終了",
+    started: "ブラウザで提示を開始しました",
+    reopened: "ブラウザの提示タブを開きました",
+    ended: "提示を終了しました",
+    updated: "ブラウザに反映しました",
+    urlCopied: "URL をコピーしました",
+    copyFailed: "URL をコピーできませんでした",
+    startFailed: (detail: string) => `提示を開始できませんでした: ${detail}`,
+    updateFailed: (detail: string) => `ブラウザを更新できませんでした: ${detail}`,
+    endFailed: (detail: string) => `提示を終了できませんでした: ${detail}`,
+    realtimeFailed: (detail: string) => `リアルタイム同期の切替に失敗しました: ${detail}`,
   },
 
   manager: {
@@ -134,6 +169,7 @@ export const messages = {
     pin: "ピン留め",
     unpin: "ピン留めを解除",
     delete: "削除",
+    openInNewWindow: "別ウィンドウで開く",
   },
 
   aria: {

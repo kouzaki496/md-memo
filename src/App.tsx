@@ -1,6 +1,7 @@
 import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { PanelLeftOpen, Plus } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { Button } from "@/components/ui/button";
 import { Sidebar } from "@/components/app/Sidebar";
 import { ManagerPanel } from "@/components/app/ManagerPanel";
@@ -8,14 +9,17 @@ import { SettingsPanel } from "@/components/app/SettingsPanel";
 import { ReadingEditorPane } from "@/components/app/ReadingEditorPane";
 import { Overlays } from "@/components/app/Overlays";
 import type { NoteMeta, ReplaceTagGloballyResult, SearchHit } from "@/types/note";
-import type { AppConfig, ThemeMode, ThemePreset } from "@/types/config";
+import type { AppConfig } from "@/types/config";
 import { useNotesData } from "@/hooks/useNotesData";
 import { useHoverPreview } from "@/hooks/useHoverPreview";
+import { useEditLockDemotion } from "@/hooks/useEditLockDemotion";
+import { acquireEditLock, releaseEditLock } from "@/lib/editLock";
 import {
   DEFAULT_NEW_NOTE_TAG,
   collectTagsFromNotes,
   dedupeTagsCaseInsensitive,
   ensureLockedInboxInTemplateTags,
+  getMarkdownBody,
   getOrphanTags,
   getTagToggleBlockedMessage,
   replaceTagTokenInList,
@@ -24,6 +28,19 @@ import {
 import { isBuiltinReservedTagName } from "@/lib/reservedTags";
 import { isSystemNotePath } from "@/lib/systemNotes";
 import { messages } from "@/lib/messages";
+import { openNoteInNewWindow } from "@/lib/noteWindow";
+import {
+  endPresentation,
+  getPresentationStatus,
+  isSamePresentationMemo,
+  pushPresentationUpdate,
+  setPresentationRealtime,
+  startPresentation,
+} from "@/lib/presentation";
+import { applyTheme, applyThemePreset } from "@/lib/theme";
+import { PresentationBar } from "@/components/app/PresentationBar";
+import { PresentationStartDialog } from "@/components/app/PresentationStartDialog";
+import type { PresentationStatus, StartPresentationResult } from "@/types/presentation";
 import "./App.css";
 
 type ContextMenuState = {
@@ -48,6 +65,9 @@ function App() {
   const [configDraft, setConfigDraft] = useState<AppConfig | null>(null);
   const [savedSettingsSnapshot, setSavedSettingsSnapshot] = useState<string | null>(null);
   const [isSavingConfig, setIsSavingConfig] = useState(false);
+  const [presentationStatus, setPresentationStatus] = useState<PresentationStatus | null>(null);
+  const [presentationStartOpen, setPresentationStartOpen] = useState(false);
+  const [presentationStartRealtime, setPresentationStartRealtime] = useState(false);
 
   const isSettingsDirty = useMemo(() => {
     if (!configDraft || savedSettingsSnapshot == null) return false;
@@ -82,28 +102,15 @@ function App() {
 
   const { hoverPreview, openHoverPreview, moveHoverPreview, closeHoverPreview } = useHoverPreview();
   const saveTimerRef = useRef<number | null>(null);
+  const presentationPushTimerRef = useRef<number | null>(null);
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
+  const presentationStatusRef = useRef(presentationStatus);
+  presentationStatusRef.current = presentationStatus;
   const currentFileName = useMemo(() => {
     if (!currentPath) return "新規メモ";
     const parts = currentPath.split(/[/\\]/);
     return parts[parts.length - 1] || currentPath;
   }, [currentPath]);
-
-  const resolveIsDark = (mode: ThemeMode): boolean => {
-    if (mode === "dark") return true;
-    if (mode === "light") return false;
-    return window.matchMedia("(prefers-color-scheme: dark)").matches;
-  };
-
-  const applyTheme = (mode: ThemeMode) => {
-    document.documentElement.classList.toggle("dark", resolveIsDark(mode));
-  };
-
-  const applyThemePreset = (preset: ThemePreset) => {
-    const root = document.documentElement;
-    if (preset === "default") root.removeAttribute("data-theme-preset");
-    else root.setAttribute("data-theme-preset", preset);
-  };
 
   const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -191,7 +198,16 @@ function App() {
       applyTheme("light");
       applyThemePreset("default");
     });
+    void getPresentationStatus(null)
+      .then(setPresentationStatus)
+      .catch((err) => console.error(err));
   }, []);
+
+  useEffect(() => {
+    void getPresentationStatus(currentPath)
+      .then(setPresentationStatus)
+      .catch((err) => console.error(err));
+  }, [currentPath]);
 
   useEffect(() => {
     if (!configDraft) return;
@@ -220,6 +236,58 @@ function App() {
   );
 
   const isCurrentSystemNote = isSystemNotePath(currentPath);
+
+  const editStateRef = useRef({
+    isEditMode,
+    input,
+    currentPath,
+    isCurrentSystemNote,
+  });
+  editStateRef.current = { isEditMode, input, currentPath, isCurrentSystemNote };
+
+  const flushSave = async () => {
+    if (saveTimerRef.current != null) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const { isEditMode: editing, input: text, currentPath: path, isCurrentSystemNote: readOnly } =
+      editStateRef.current;
+    if (!editing || readOnly || !text) return;
+    setStatus(messages.status.saving);
+    try {
+      const savedPath = await invoke<string>("save_note", {
+        content: text,
+        currentPath: path ?? undefined,
+      });
+      setCurrentPath(savedPath);
+      setStatus(messages.status.saved);
+      await loadNotes();
+    } catch (err) {
+      console.error(err);
+      setStatus(messages.status.saveFailed);
+    }
+  };
+
+  const reloadCurrentNoteFromDisk = async () => {
+    const path = editStateRef.current.currentPath;
+    if (!path) return;
+    try {
+      const content = await invoke<string>("read_note", { path });
+      setInput(content);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  useEditLockDemotion({
+    getState: () => ({ isEditMode: editStateRef.current.isEditMode }),
+    flushSave,
+    reloadFromDisk: reloadCurrentNoteFromDisk,
+    exitEditMode: () => {
+      setIsEditMode(false);
+      setStatus(messages.status.previewMode);
+    },
+  });
 
   useEffect(() => {
     if (isCurrentSystemNote && isEditMode) {
@@ -263,16 +331,31 @@ function App() {
   }, [input, currentPath, isEditMode, isCurrentSystemNote]);
 
   const createNew = () => {
-    setInput(toggleTagInContent("", DEFAULT_NEW_NOTE_TAG));
-    setCurrentPath(null);
-    setActiveHit(null);
-    setIsEditMode(true);
-    setIsManageMode(false);
-    setIsSettingsMode(false);
-    setStatus(messages.status.ready);
+    void (async () => {
+      if (isEditMode) {
+        await flushSave();
+        await releaseEditLock();
+      }
+      setInput(toggleTagInContent("", DEFAULT_NEW_NOTE_TAG));
+      setCurrentPath(null);
+      setActiveHit(null);
+      setIsManageMode(false);
+      setIsSettingsMode(false);
+      try {
+        await acquireEditLock(null);
+        setIsEditMode(true);
+        setStatus(messages.status.ready);
+      } catch (err) {
+        console.error(err);
+      }
+    })();
   };
 
   const openNote = async (path: string, hit?: SearchHit) => {
+    if (isEditMode) {
+      await flushSave();
+      await releaseEditLock();
+    }
     try {
       const content = await invoke<string>("read_note", { path });
       setCurrentPath(path);
@@ -295,21 +378,38 @@ function App() {
       setStatus(messages.status.builtinReadOnly);
       return;
     }
-    setIsEditMode(true);
-    setIsManageMode(false);
-    setIsSettingsMode(false);
-    setActiveHit(null); // 編集開始時は検索ハイライトを消す
-    setStatus(messages.status.editMode);
+    void (async () => {
+      try {
+        await acquireEditLock(currentPath);
+        setIsEditMode(true);
+        setIsManageMode(false);
+        setIsSettingsMode(false);
+        setActiveHit(null);
+        setStatus(messages.status.editMode);
+      } catch (err) {
+        console.error(err);
+      }
+    })();
   };
 
   const enterPreviewMode = () => {
-    setIsEditMode(false);
-    setIsManageMode(false);
-    setIsSettingsMode(false);
-    setStatus(messages.status.previewMode);
+    void (async () => {
+      if (isEditMode) {
+        await releaseEditLock();
+      }
+      setIsEditMode(false);
+      setIsManageMode(false);
+      setIsSettingsMode(false);
+      setStatus(messages.status.previewMode);
+    })();
   };
 
   const openSettings = async () => {
+    if (isEditMode) {
+      await flushSave();
+      await releaseEditLock();
+      setIsEditMode(false);
+    }
     setIsSettingsMode(true);
     setIsManageMode(false);
     try {
@@ -486,6 +586,153 @@ function App() {
     void deleteNote(meta);
   };
 
+  const handleOpenInNewWindow = (note: NoteMeta) => {
+    setContextMenu(null);
+    void openNoteInNewWindow(note.path).catch((err) => {
+      console.error(err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatus(`別ウィンドウを開けませんでした: ${msg}`);
+    });
+  };
+
+  const handleOpenCurrentInNewWindow = () => {
+    if (!currentPath) return;
+    void openNoteInNewWindow(currentPath).catch((err) => {
+      console.error(err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatus(`別ウィンドウを開けませんでした: ${msg}`);
+    });
+  };
+
+  const resolveCurrentPresentationBody = () => getMarkdownBody(input);
+
+  useEffect(() => {
+    const status = presentationStatusRef.current;
+    if (!status?.active || !status.realtime) return;
+    if (!isEditMode) return;
+    if (!isSamePresentationMemo(status, currentPath)) return;
+
+    if (presentationPushTimerRef.current != null) {
+      window.clearTimeout(presentationPushTimerRef.current);
+    }
+    presentationPushTimerRef.current = window.setTimeout(() => {
+      void pushPresentationUpdate(currentPath, resolveCurrentPresentationBody()).catch((err) => {
+        console.error(err);
+      });
+    }, 400);
+
+    return () => {
+      if (presentationPushTimerRef.current != null) {
+        window.clearTimeout(presentationPushTimerRef.current);
+      }
+    };
+  }, [
+    input,
+    isEditMode,
+    currentPath,
+    presentationStatus?.active,
+    presentationStatus?.realtime,
+    presentationStatus?.boundPath,
+  ]);
+
+  const presentationStatusFromResult = (result: StartPresentationResult): PresentationStatus => ({
+    active: true,
+    boundPath: result.boundPath,
+    fileName: result.fileName,
+    url: result.url,
+    realtime: result.realtime,
+  });
+
+  const handleStartPresentation = () => {
+    if (presentationStatus?.active && isSamePresentationMemo(presentationStatus, currentPath)) {
+      void openUrl(presentationStatus.url)
+        .then(() => setStatus(messages.presentation.reopened))
+        .catch((err) => {
+          console.error(err);
+          const msg = err instanceof Error ? err.message : String(err);
+          setStatus(messages.presentation.startFailed(msg));
+        });
+      return;
+    }
+
+    setPresentationStartRealtime(false);
+    setPresentationStartOpen(true);
+  };
+
+  const handleConfirmPresentationStart = async () => {
+    try {
+      const result = await startPresentation({
+        boundPath: currentPath,
+        fileName: currentFileName,
+        body: resolveCurrentPresentationBody(),
+        openBrowser: true,
+        realtime: presentationStartRealtime,
+      });
+      setPresentationStatus(presentationStatusFromResult(result));
+      setPresentationStartOpen(false);
+      setStatus(messages.presentation.started);
+    } catch (err) {
+      console.error(err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatus(messages.presentation.startFailed(msg));
+    }
+  };
+
+  const handlePushPresentationUpdate = async () => {
+    if (!presentationStatus?.active) return;
+    try {
+      await pushPresentationUpdate(currentPath, resolveCurrentPresentationBody());
+      setStatus(messages.presentation.updated);
+    } catch (err) {
+      console.error(err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatus(messages.presentation.updateFailed(msg));
+    }
+  };
+
+  const handleCopyPresentationUrl = async () => {
+    if (!presentationStatus?.url) return;
+    try {
+      await navigator.clipboard.writeText(presentationStatus.url);
+      setStatus(messages.presentation.urlCopied);
+    } catch (err) {
+      console.error(err);
+      setStatus(messages.presentation.copyFailed);
+    }
+  };
+
+  const handleEndPresentation = async () => {
+    try {
+      await endPresentation(currentPath);
+      setPresentationStatus(null);
+      setStatus(messages.presentation.ended);
+    } catch (err) {
+      console.error(err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatus(messages.presentation.endFailed(msg));
+    }
+  };
+
+  const handleTogglePresentationRealtime = async () => {
+    if (!presentationStatus?.active) return;
+    const next = !presentationStatus.realtime;
+    try {
+      await setPresentationRealtime(currentPath, next);
+      const nextStatus = { ...presentationStatus, realtime: next };
+      setPresentationStatus(nextStatus);
+      if (next) {
+        await pushPresentationUpdate(currentPath, resolveCurrentPresentationBody());
+      }
+      setStatus(
+        next ? messages.presentation.realtimeEnabled : messages.presentation.realtimeDisabled
+      );
+    } catch (err) {
+      console.error(err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatus(messages.presentation.realtimeFailed(msg));
+    }
+  };
+
   useEffect(() => {
     if (!activeHit) return;
     if (!isEditMode) return;
@@ -573,8 +820,15 @@ function App() {
               status={status}
               onCreateNew={createNew}
               onOpenManager={() => {
-                setIsSettingsMode(false);
-                void openManager();
+                void (async () => {
+                  if (isEditMode) {
+                    await flushSave();
+                    await releaseEditLock();
+                    setIsEditMode(false);
+                  }
+                  setIsSettingsMode(false);
+                  await openManager();
+                })();
               }}
               onOpenSettings={() => void openSettings()}
               onOpenNote={(path, hit) => void openNote(path, hit)}
@@ -668,28 +922,41 @@ function App() {
             onCloseHoverPreview={closeHoverPreview}
           />
         ) : (
-          <ReadingEditorPane
-            isEditMode={isEditMode}
-            isReadOnly={isCurrentSystemNote}
-            currentPath={currentPath}
-            currentFileName={currentFileName}
-            input={input}
-            previewWidth={previewWidth}
-            editorScale={editorScale}
-            previewScale={previewScale}
-            templateTags={templateTags}
-            onEnterEditMode={enterEditMode}
-            onEnterPreviewMode={enterPreviewMode}
-            onChangeInput={setInput}
-            onToggleTemplateTag={toggleTemplateTag}
-            onStartPreviewResize={startPreviewResize}
-            onAdjustEditorScale={adjustEditorScale}
-            onAdjustPreviewScale={adjustPreviewScale}
-            onResetEditorScale={resetEditorScale}
-            onResetPreviewScale={resetPreviewScale}
-            onDeleteCurrentNote={deleteCurrentNote}
-            editorRef={editorRef}
-          />
+          <div className="flex min-h-0 flex-1 flex-col">
+            {presentationStatus?.active && (
+              <PresentationBar
+                status={presentationStatus}
+                onPushUpdate={() => void handlePushPresentationUpdate()}
+                onCopyUrl={() => void handleCopyPresentationUrl()}
+                onToggleRealtime={() => void handleTogglePresentationRealtime()}
+                onEnd={() => void handleEndPresentation()}
+              />
+            )}
+            <ReadingEditorPane
+              isEditMode={isEditMode}
+              isReadOnly={isCurrentSystemNote}
+              currentPath={currentPath}
+              currentFileName={currentFileName}
+              input={input}
+              previewWidth={previewWidth}
+              editorScale={editorScale}
+              previewScale={previewScale}
+              templateTags={templateTags}
+              onEnterEditMode={enterEditMode}
+              onEnterPreviewMode={enterPreviewMode}
+              onChangeInput={setInput}
+              onToggleTemplateTag={toggleTemplateTag}
+              onStartPreviewResize={startPreviewResize}
+              onAdjustEditorScale={adjustEditorScale}
+              onAdjustPreviewScale={adjustPreviewScale}
+              onResetEditorScale={resetEditorScale}
+              onResetPreviewScale={resetPreviewScale}
+              onDeleteCurrentNote={deleteCurrentNote}
+              onOpenInNewWindow={currentPath ? handleOpenCurrentInNewWindow : undefined}
+              onPresentInBrowser={() => void handleStartPresentation()}
+              editorRef={editorRef}
+            />
+          </div>
         )}
       </div>
 
@@ -698,7 +965,18 @@ function App() {
         hoverPreview={hoverPreview}
         onPinOrUnpin={(note) => void pinOrUnpinNote(note)}
         onDelete={(note) => void deleteNote(note)}
+        onOpenInNewWindow={handleOpenInNewWindow}
       />
+
+      {presentationStartOpen && (
+        <PresentationStartDialog
+          fileName={currentFileName}
+          realtime={presentationStartRealtime}
+          onChangeRealtime={setPresentationStartRealtime}
+          onConfirm={() => void handleConfirmPresentationStart()}
+          onCancel={() => setPresentationStartOpen(false)}
+        />
+      )}
     </div>
   );
 }

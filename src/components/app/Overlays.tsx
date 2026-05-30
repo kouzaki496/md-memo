@@ -22,10 +22,11 @@ type OverlaysProps = {
   hoverPreview: HoverPreviewState | null;
   onPinOrUnpin: (note: NoteMeta) => void;
   onDelete: (note: NoteMeta) => void;
+  onOpenInNewWindow: (note: NoteMeta) => void;
 };
 
 export function Overlays(props: OverlaysProps) {
-  const { contextMenu, hoverPreview, onPinOrUnpin, onDelete } = props;
+  const { contextMenu, hoverPreview, onPinOrUnpin, onDelete, onOpenInNewWindow } = props;
   const hoverPreviewBody = hoverPreview ? getMarkdownBody(hoverPreview.content) : "";
   const isSystemNote = contextMenu
     ? contextMenu.note.systemNote || isSystemNotePath(contextMenu.note.path)
@@ -40,9 +41,25 @@ export function Overlays(props: OverlaysProps) {
           onClick={(e) => e.stopPropagation()}
         >
           {isSystemNote ? (
-            <div className="px-3 py-2 text-sm text-muted-foreground">{messages.tags.builtinNote}</div>
+            <>
+              <button
+                type="button"
+                className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-muted"
+                onClick={() => onOpenInNewWindow(contextMenu.note)}
+              >
+                {messages.contextMenu.openInNewWindow}
+              </button>
+              <div className="px-3 py-2 text-sm text-muted-foreground">{messages.tags.builtinNote}</div>
+            </>
           ) : (
             <>
+              <button
+                type="button"
+                className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-muted"
+                onClick={() => onOpenInNewWindow(contextMenu.note)}
+              >
+                {messages.contextMenu.openInNewWindow}
+              </button>
               <button
                 type="button"
                 className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-muted"
