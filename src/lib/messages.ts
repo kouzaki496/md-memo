@@ -95,6 +95,10 @@ export const messages = {
     recentExpand: "最近を展開",
     searchResults: "検索結果",
     empty: "なし",
+    presenting: "ブラウザ提示中",
+    presentingOpenTab: "ブラウザで表示",
+    presentingOpenNote: "メモを開く",
+    presentingCount: (n: number) => `${n} 件`,
     lineHit: (line: number, text: string) => `${line} 行目: ${text}`,
   },
 
@@ -119,7 +123,7 @@ export const messages = {
     active: (fileName: string) => `提示中: ${fileName}`,
     startDialogTitle: "ブラウザで提示",
     startDialogBody: (fileName: string) =>
-      `「${fileName}」を別タブで提示します。他のメモは別タブで共有できます。`,
+      `「${fileName}」を提示します。ブラウザは共通の 1 タブで表示され、アプリでメモを切り替えると内容も切り替わります。`,
     startConfirmButton: "提示を開始",
     startCancel: "キャンセル",
     realtimeLabel: "リアルタイム同期",
@@ -138,6 +142,10 @@ export const messages = {
     end: "提示を終了",
     started: "ブラウザで提示を開始しました",
     reopened: "ブラウザの提示タブを開きました",
+    displaySwitched: (fileName: string) => `ブラウザ表示を「${fileName}」に切り替えました`,
+    viewingUnpresented: (label: string) =>
+      `ブラウザで ${label} を提示中です。編集中のメモは提示されていません`,
+    openPresentedMemo: "提示中のメモを開く",
     ended: "提示を終了しました",
     updated: "ブラウザに反映しました",
     urlCopied: "URL をコピーしました",

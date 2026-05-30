@@ -8,10 +8,10 @@ mod presentation;
 mod preview_render;
 mod system_notes;
 
-use tauri::{Manager, WindowEvent};
+use tauri::{Manager, RunEvent, WindowEvent};
 
 fn main() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .on_window_event(|window, event| {
             if let WindowEvent::Destroyed = event {
@@ -51,11 +51,21 @@ fn main() {
             config::get_config,
             config::save_config,
             presentation::start_presentation,
+            presentation::set_presentation_display,
+            presentation::set_presentation_theme,
+            presentation::get_presentation_viewer_url,
             presentation::push_presentation_update,
             presentation::set_presentation_realtime,
             presentation::end_presentation,
             presentation::get_presentation_status,
+            presentation::list_presentation_statuses,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|_app_handle, event| {
+        if let RunEvent::Exit = event {
+            tauri::async_runtime::block_on(presentation::shutdown_on_app_exit());
+        }
+    });
 }

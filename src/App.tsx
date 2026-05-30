@@ -31,16 +31,20 @@ import { messages } from "@/lib/messages";
 import { openNoteInNewWindow } from "@/lib/noteWindow";
 import {
   endPresentation,
-  getPresentationStatus,
+  getPresentationViewerUrl,
   isSamePresentationMemo,
+  listPresentationStatuses,
   pushPresentationUpdate,
+  setPresentationDisplay,
   setPresentationRealtime,
   startPresentation,
+  syncPresentationTheme,
 } from "@/lib/presentation";
 import { applyTheme, applyThemePreset } from "@/lib/theme";
 import { PresentationBar } from "@/components/app/PresentationBar";
+import { PresentationScopeHint } from "@/components/app/PresentationScopeHint";
 import { PresentationStartDialog } from "@/components/app/PresentationStartDialog";
-import type { PresentationStatus, StartPresentationResult } from "@/types/presentation";
+import type { PresentationStatus } from "@/types/presentation";
 import "./App.css";
 
 type ContextMenuState = {
@@ -65,9 +69,26 @@ function App() {
   const [configDraft, setConfigDraft] = useState<AppConfig | null>(null);
   const [savedSettingsSnapshot, setSavedSettingsSnapshot] = useState<string | null>(null);
   const [isSavingConfig, setIsSavingConfig] = useState(false);
-  const [presentationStatus, setPresentationStatus] = useState<PresentationStatus | null>(null);
+  const [activePresentations, setActivePresentations] = useState<PresentationStatus[]>([]);
+  const [viewerUrl, setViewerUrl] = useState<string | null>(null);
   const [presentationStartOpen, setPresentationStartOpen] = useState(false);
-  const [presentationStartRealtime, setPresentationStartRealtime] = useState(false);
+  const [presentationStartRealtime, setPresentationStartRealtime] = useState(true);
+  const viewerOpenedRef = useRef(false);
+
+  const currentPresentation = useMemo(
+    () => activePresentations.find((p) => isSamePresentationMemo(p, currentPath)) ?? null,
+    [activePresentations, currentPath]
+  );
+
+  const presentedPaths = useMemo(
+    () =>
+      new Set(
+        activePresentations
+          .map((p) => p.boundPath)
+          .filter((path): path is string => path != null)
+      ),
+    [activePresentations]
+  );
 
   const isSettingsDirty = useMemo(() => {
     if (!configDraft || savedSettingsSnapshot == null) return false;
@@ -104,8 +125,8 @@ function App() {
   const saveTimerRef = useRef<number | null>(null);
   const presentationPushTimerRef = useRef<number | null>(null);
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
-  const presentationStatusRef = useRef(presentationStatus);
-  presentationStatusRef.current = presentationStatus;
+  const activePresentationsRef = useRef(activePresentations);
+  activePresentationsRef.current = activePresentations;
   const currentFileName = useMemo(() => {
     if (!currentPath) return "新規メモ";
     const parts = currentPath.split(/[/\\]/);
@@ -192,31 +213,52 @@ function App() {
     return merged;
   };
 
+  const refreshActivePresentations = async () => {
+    const list = await listPresentationStatuses();
+    setActivePresentations(list);
+    if (list[0]?.url) {
+      setViewerUrl(list[0].url);
+    } else {
+      const url = await getPresentationViewerUrl();
+      if (url) setViewerUrl(url);
+    }
+    return list;
+  };
+
+  const syncViewerThemeIfPresenting = async () => {
+    if (!configDraft) return;
+    if (activePresentationsRef.current.length === 0) return;
+    await syncPresentationTheme(configDraft.themeMode, configDraft.themePreset);
+  };
+
   useEffect(() => {
     void loadConfig().catch((err) => {
       console.error(err);
       applyTheme("light");
       applyThemePreset("default");
     });
-    void getPresentationStatus(null)
-      .then(setPresentationStatus)
-      .catch((err) => console.error(err));
+    void refreshActivePresentations().catch((err) => console.error(err));
   }, []);
-
-  useEffect(() => {
-    void getPresentationStatus(currentPath)
-      .then(setPresentationStatus)
-      .catch((err) => console.error(err));
-  }, [currentPath]);
 
   useEffect(() => {
     if (!configDraft) return;
     if (configDraft.themeMode !== "system") return;
     const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const onChange = () => applyTheme("system");
+    const onChange = () => {
+      applyTheme("system");
+      void syncViewerThemeIfPresenting().catch((err) => console.error(err));
+    };
     media.addEventListener("change", onChange);
     return () => media.removeEventListener("change", onChange);
-  }, [configDraft?.themeMode]);
+  }, [configDraft?.themeMode, activePresentations.length]);
+
+  useEffect(() => {
+    if (!configDraft) return;
+    if (activePresentations.length === 0) return;
+    void syncPresentationTheme(configDraft.themeMode, configDraft.themePreset).catch((err) =>
+      console.error(err)
+    );
+  }, [configDraft?.themeMode, configDraft?.themePreset, activePresentations.length]);
 
   const tagsInUse = useMemo(() => collectTagsFromNotes(notes), [notes]);
 
@@ -606,11 +648,27 @@ function App() {
 
   const resolveCurrentPresentationBody = () => getMarkdownBody(input);
 
+  const openViewerTab = async (statusMessage?: string) => {
+    const url =
+      viewerUrl ?? currentPresentation?.url ?? activePresentations[0]?.url ?? (await getPresentationViewerUrl());
+    if (!url) return;
+    await openUrl(url);
+    viewerOpenedRef.current = true;
+    setViewerUrl(url);
+    setStatus(statusMessage ?? messages.presentation.reopened);
+  };
+
   useEffect(() => {
-    const status = presentationStatusRef.current;
+    if (!currentPresentation?.active) return;
+    void setPresentationDisplay(currentPath).catch((err) => console.error(err));
+  }, [currentPath, currentPresentation?.active, currentPresentation?.boundPath]);
+
+  useEffect(() => {
+    const status = activePresentationsRef.current.find((p) =>
+      isSamePresentationMemo(p, currentPath)
+    );
     if (!status?.active || !status.realtime) return;
     if (!isEditMode) return;
-    if (!isSamePresentationMemo(status, currentPath)) return;
 
     if (presentationPushTimerRef.current != null) {
       window.clearTimeout(presentationPushTimerRef.current);
@@ -630,32 +688,25 @@ function App() {
     input,
     isEditMode,
     currentPath,
-    presentationStatus?.active,
-    presentationStatus?.realtime,
-    presentationStatus?.boundPath,
+    currentPresentation?.active,
+    currentPresentation?.realtime,
+    currentPresentation?.boundPath,
   ]);
 
-  const presentationStatusFromResult = (result: StartPresentationResult): PresentationStatus => ({
-    active: true,
-    boundPath: result.boundPath,
-    fileName: result.fileName,
-    url: result.url,
-    realtime: result.realtime,
-  });
-
   const handleStartPresentation = () => {
-    if (presentationStatus?.active && isSamePresentationMemo(presentationStatus, currentPath)) {
-      void openUrl(presentationStatus.url)
-        .then(() => setStatus(messages.presentation.reopened))
-        .catch((err) => {
-          console.error(err);
-          const msg = err instanceof Error ? err.message : String(err);
-          setStatus(messages.presentation.startFailed(msg));
-        });
+    if (
+      currentPresentation?.active &&
+      isSamePresentationMemo(currentPresentation, currentPath)
+    ) {
+      void openViewerTab().catch((err) => {
+        console.error(err);
+        const msg = err instanceof Error ? err.message : String(err);
+        setStatus(messages.presentation.startFailed(msg));
+      });
       return;
     }
 
-    setPresentationStartRealtime(false);
+    setPresentationStartRealtime(true);
     setPresentationStartOpen(true);
   };
 
@@ -665,10 +716,15 @@ function App() {
         boundPath: currentPath,
         fileName: currentFileName,
         body: resolveCurrentPresentationBody(),
-        openBrowser: true,
+        openBrowser: !viewerOpenedRef.current,
         realtime: presentationStartRealtime,
       });
-      setPresentationStatus(presentationStatusFromResult(result));
+      viewerOpenedRef.current = true;
+      setViewerUrl(result.url);
+      if (configDraft) {
+        await syncPresentationTheme(configDraft.themeMode, configDraft.themePreset);
+      }
+      await refreshActivePresentations();
       setPresentationStartOpen(false);
       setStatus(messages.presentation.started);
     } catch (err) {
@@ -679,7 +735,7 @@ function App() {
   };
 
   const handlePushPresentationUpdate = async () => {
-    if (!presentationStatus?.active) return;
+    if (!currentPresentation?.active) return;
     try {
       await pushPresentationUpdate(currentPath, resolveCurrentPresentationBody());
       setStatus(messages.presentation.updated);
@@ -691,9 +747,11 @@ function App() {
   };
 
   const handleCopyPresentationUrl = async () => {
-    if (!presentationStatus?.url) return;
+    const url =
+      viewerUrl ?? currentPresentation?.url ?? activePresentations[0]?.url ?? (await getPresentationViewerUrl());
+    if (!url) return;
     try {
-      await navigator.clipboard.writeText(presentationStatus.url);
+      await navigator.clipboard.writeText(url);
       setStatus(messages.presentation.urlCopied);
     } catch (err) {
       console.error(err);
@@ -704,7 +762,10 @@ function App() {
   const handleEndPresentation = async () => {
     try {
       await endPresentation(currentPath);
-      setPresentationStatus(null);
+      const list = await refreshActivePresentations();
+      if (list.length === 0) {
+        viewerOpenedRef.current = false;
+      }
       setStatus(messages.presentation.ended);
     } catch (err) {
       console.error(err);
@@ -714,12 +775,15 @@ function App() {
   };
 
   const handleTogglePresentationRealtime = async () => {
-    if (!presentationStatus?.active) return;
-    const next = !presentationStatus.realtime;
+    if (!currentPresentation?.active) return;
+    const next = !currentPresentation.realtime;
     try {
       await setPresentationRealtime(currentPath, next);
-      const nextStatus = { ...presentationStatus, realtime: next };
-      setPresentationStatus(nextStatus);
+      setActivePresentations((prev) =>
+        prev.map((p) =>
+          isSamePresentationMemo(p, currentPath) ? { ...p, realtime: next } : p
+        )
+      );
       if (next) {
         await pushPresentationUpdate(currentPath, resolveCurrentPresentationBody());
       }
@@ -730,6 +794,21 @@ function App() {
       console.error(err);
       const msg = err instanceof Error ? err.message : String(err);
       setStatus(messages.presentation.realtimeFailed(msg));
+    }
+  };
+
+  const handleShowPresentationInBrowser = async (status: PresentationStatus) => {
+    try {
+      await setPresentationDisplay(status.boundPath);
+      if (!viewerOpenedRef.current) {
+        await openViewerTab(messages.presentation.reopened);
+      } else {
+        setStatus(messages.presentation.displaySwitched(status.fileName));
+      }
+    } catch (err) {
+      console.error(err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatus(messages.presentation.startFailed(msg));
     }
   };
 
@@ -837,6 +916,10 @@ function App() {
               onMoveHoverPreview={moveHoverPreview}
               onCloseHoverPreview={closeHoverPreview}
               onCloseSidebar={() => setIsSidebarOpen(false)}
+              activePresentations={activePresentations}
+              presentedPaths={presentedPaths}
+              onOpenPresentedNote={(path) => void openNote(path)}
+              onReopenPresentationTab={(status) => void handleShowPresentationInBrowser(status)}
             />
           </div>
           <div
@@ -895,6 +978,11 @@ function App() {
               setConfigDraft(next);
               applyTheme(next.themeMode);
               applyThemePreset(next.themePreset);
+              if (activePresentations.length > 0) {
+                void syncPresentationTheme(next.themeMode, next.themePreset).catch((err) =>
+                  console.error(err)
+                );
+              }
             }}
             onSave={() => void saveSettings()}
             onClose={closeSettings}
@@ -923,13 +1011,19 @@ function App() {
           />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">
-            {presentationStatus?.active && (
+            {currentPresentation?.active && (
               <PresentationBar
-                status={presentationStatus}
+                status={currentPresentation}
                 onPushUpdate={() => void handlePushPresentationUpdate()}
                 onCopyUrl={() => void handleCopyPresentationUrl()}
                 onToggleRealtime={() => void handleTogglePresentationRealtime()}
                 onEnd={() => void handleEndPresentation()}
+              />
+            )}
+            {!currentPresentation?.active && activePresentations.length > 0 && (
+              <PresentationScopeHint
+                activePresentations={activePresentations}
+                onOpenPresentedNote={(path) => void openNote(path)}
               />
             )}
             <ReadingEditorPane

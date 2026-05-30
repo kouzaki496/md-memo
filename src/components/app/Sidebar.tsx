@@ -1,9 +1,10 @@
 import { type MouseEvent, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Clock, List, Lock, PanelLeftClose, Pin, Plus, Search, Settings } from "lucide-react";
+import { ChevronDown, ChevronRight, Clock, ExternalLink, List, Lock, Monitor, PanelLeftClose, Pin, Plus, Search, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import type { PresentationStatus } from "@/types/presentation";
 import type { NoteMeta, SearchHit } from "@/types/note";
 import { INBOX_EXCLUSIVE_MESSAGE } from "@/lib/noteTags";
 import { messages } from "@/lib/messages";
@@ -27,6 +28,10 @@ type SidebarProps = {
   onMoveHoverPreview: (e: MouseEvent) => void;
   onCloseHoverPreview: () => void;
   onCloseSidebar: () => void;
+  activePresentations: PresentationStatus[];
+  presentedPaths: Set<string>;
+  onOpenPresentedNote: (path: string) => void;
+  onReopenPresentationTab: (presentation: PresentationStatus) => void;
 };
 
 export function Sidebar(props: SidebarProps) {
@@ -48,6 +53,10 @@ export function Sidebar(props: SidebarProps) {
     onMoveHoverPreview,
     onCloseHoverPreview,
     onCloseSidebar,
+    activePresentations,
+    presentedPaths,
+    onOpenPresentedNote,
+    onReopenPresentationTab,
   } = props;
   const isSearching = query.trim().length > 0;
   const [isRecentOpen, setIsRecentOpen] = useState(true);
@@ -59,6 +68,16 @@ export function Sidebar(props: SidebarProps) {
     }
     prevIsSearchingRef.current = isSearching;
   }, [isSearching]);
+
+  const renderPresentingBadge = (path: string) => {
+    if (!presentedPaths.has(path)) return null;
+    return (
+      <Monitor
+        className="h-3 w-3 shrink-0 text-primary"
+        aria-label={messages.sidebar.presenting}
+      />
+    );
+  };
 
   const renderNoteTags = (tags: string[]) => {
     if (tags.length === 0) return null;
@@ -152,6 +171,7 @@ export function Sidebar(props: SidebarProps) {
                   <span className="block min-w-0 text-left">
                     <span className="flex min-w-0 items-center gap-1 truncate">
                       <span className="truncate">{n.title}</span>
+                      {renderPresentingBadge(n.path)}
                       {n.systemNote && (
                         <Lock className="h-3 w-3 shrink-0 text-muted-foreground" aria-label={messages.aria.builtinNote} />
                       )}
@@ -193,7 +213,10 @@ export function Sidebar(props: SidebarProps) {
                     onMouseLeave={onCloseHoverPreview}
                   >
                     <span className="block min-w-0 text-left">
-                      <span className="block truncate">{n.title}</span>
+                      <span className="flex min-w-0 items-center gap-1 truncate">
+                        <span className="truncate">{n.title}</span>
+                        {renderPresentingBadge(n.path)}
+                      </span>
                       {renderNoteTags(n.tags)}
                     </span>
                   </Button>
@@ -232,6 +255,61 @@ export function Sidebar(props: SidebarProps) {
           )}
         </div>
       </ScrollArea>
+
+      {activePresentations.length > 0 && (
+        <div className="border-t bg-primary/5 px-3 py-2">
+          <h4 className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-primary">
+            <Monitor className="h-3 w-3 shrink-0" />
+            {messages.sidebar.presenting}
+            <span className="rounded bg-primary/10 px-1.5 py-0 text-[10px] font-normal">
+              {messages.sidebar.presentingCount(activePresentations.length)}
+            </span>
+          </h4>
+          <ul className="space-y-1">
+            {activePresentations.map((p) => {
+              const key = p.boundPath ?? `unsaved:${p.fileName}`;
+              const isCurrent = p.boundPath === currentPath;
+              return (
+                <li key={key} className="flex items-center gap-1">
+                  {p.boundPath ? (
+                    <button
+                      type="button"
+                      className={cn(
+                        "min-w-0 flex-1 truncate text-left text-xs hover:underline",
+                        isCurrent ? "font-medium text-foreground" : "text-muted-foreground"
+                      )}
+                      onClick={() => onOpenPresentedNote(p.boundPath!)}
+                      title={messages.sidebar.presentingOpenNote}
+                    >
+                      {p.fileName}
+                    </button>
+                  ) : (
+                    <span
+                      className={cn(
+                        "min-w-0 flex-1 truncate text-left text-xs",
+                        isCurrent ? "font-medium text-foreground" : "text-muted-foreground"
+                      )}
+                      title={p.fileName}
+                    >
+                      {p.fileName}
+                    </span>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="h-6 w-6 shrink-0"
+                    onClick={() => onReopenPresentationTab(p)}
+                    title={messages.sidebar.presentingOpenTab}
+                    aria-label={messages.sidebar.presentingOpenTab}
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
 
       <div className="p-4 border-t bg-background/70">
         <div

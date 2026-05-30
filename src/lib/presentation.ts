@@ -1,10 +1,30 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { ThemeMode, ThemePreset } from "@/types/config";
 import type { PresentationStatus, StartPresentationResult } from "@/types/presentation";
+
+export async function listPresentationStatuses(): Promise<PresentationStatus[]> {
+  return invoke<PresentationStatus[]>("list_presentation_statuses");
+}
 
 export async function getPresentationStatus(
   boundPath: string | null
 ): Promise<PresentationStatus | null> {
   return invoke<PresentationStatus | null>("get_presentation_status", { boundPath });
+}
+
+export async function getPresentationViewerUrl(): Promise<string | null> {
+  return invoke<string | null>("get_presentation_viewer_url");
+}
+
+export async function setPresentationDisplay(boundPath: string | null): Promise<void> {
+  await invoke("set_presentation_display", { boundPath });
+}
+
+export async function syncPresentationTheme(
+  themeMode: ThemeMode,
+  themePreset: ThemePreset
+): Promise<void> {
+  await invoke("set_presentation_theme", { themeMode, themePreset });
 }
 
 export async function startPresentation(args: {
