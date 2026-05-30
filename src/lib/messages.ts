@@ -34,7 +34,7 @@ export const messages = {
   confirm: {
     deleteNote: (title: string) => `「${title}」を削除しますか？`,
     deleteSelected: (n: number) => `選択した ${n} 件を削除しますか？`,
-    settingsDiscard: "変更を保存せず閉じますか？",
+    settingsDiscard: "設定の変更が保存されていません。保存せず続けますか？",
     removeTagGlobally: (tag: string) =>
       `すべてのメモから「${tag}」タグを外します。よろしいですか？`,
     replaceTagGlobally: (from: string, to: string) =>
@@ -129,7 +129,13 @@ export const messages = {
     deleteNoteDisabled: "未保存のメモは削除できません",
     openInNewWindow: "別ウィンドウで開く",
     presentInBrowser: "ブラウザで提示…",
-    placeholder: "メモを入力…",
+    insertImage: "画像を挿入",
+    imageFilterName: "画像",
+    imageInsertFailed: "画像を挿入できませんでした",
+    imageDropHint: "ここに画像をドロップ",
+    imageMissing: "画像が見つかりません",
+    imageLoading: "画像を読み込み中",
+    placeholder: "Markdown を入力…",
     tagsBar: "タグ",
     tagsNone: "（なし）",
     lineCount: (n: number) => `${n} 行`,
@@ -249,6 +255,16 @@ export const messages = {
       detail ? `不正なテーマ設定です: ${detail}` : "不正なテーマ設定です",
     invalid_theme_preset: (detail?: string) =>
       detail ? `不正なテーマプリセットです: ${detail}` : "不正なテーマプリセットです",
+
+    attachment_empty: "画像データが空です",
+    attachment_save_failed: (detail?: string) =>
+      detail ? `画像を保存できませんでした: ${detail}` : "画像を保存できませんでした",
+    attachment_import_failed: (detail?: string) =>
+      detail ? `画像を読み込めませんでした: ${detail}` : "画像を読み込めませんでした",
+    attachment_path_invalid: "画像パスが不正です",
+    attachment_not_found: "画像が見つかりません",
+    attachment_read_failed: (detail?: string) =>
+      detail ? `画像を読み込めませんでした: ${detail}` : "画像を読み込めませんでした",
 
     internal_lock_failed: (detail?: string) =>
       detail ? `内部エラーが発生しました: ${detail}` : "内部エラーが発生しました",

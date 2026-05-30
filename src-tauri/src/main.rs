@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app_error;
+mod attachments;
 mod config;
 mod edit_lock;
 mod notes;
@@ -56,6 +57,10 @@ fn main() {
             config::resolve_notes_dir,
             config::open_notes_dir,
             config::save_config,
+            attachments::save_note_attachment,
+            attachments::import_note_attachment,
+            attachments::resolve_attachment_path,
+            attachments::read_note_attachment,
             presentation::start_presentation,
             presentation::set_presentation_display,
             presentation::set_presentation_theme,

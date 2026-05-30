@@ -36,6 +36,13 @@ pub const BROWSER_OPEN_FAILED: &str = "browser_open_failed";
 pub const INVALID_THEME_MODE: &str = "invalid_theme_mode";
 pub const INVALID_THEME_PRESET: &str = "invalid_theme_preset";
 
+pub const ATTACHMENT_EMPTY: &str = "attachment_empty";
+pub const ATTACHMENT_SAVE_FAILED: &str = "attachment_save_failed";
+pub const ATTACHMENT_IMPORT_FAILED: &str = "attachment_import_failed";
+pub const ATTACHMENT_PATH_INVALID: &str = "attachment_path_invalid";
+pub const ATTACHMENT_NOT_FOUND: &str = "attachment_not_found";
+pub const ATTACHMENT_READ_FAILED: &str = "attachment_read_failed";
+
 pub const INTERNAL_LOCK_FAILED: &str = "internal_lock_failed";
 
 pub fn err(code: &'static str) -> String {

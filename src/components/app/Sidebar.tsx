@@ -24,6 +24,7 @@ type SidebarProps = {
   onOpenSettings: () => void;
   onOpenNote: (path: string, hit?: SearchHit) => void;
   onOpenContextMenu: (e: MouseEvent, note: NoteMeta) => void;
+  onOpenContextMenuForPath: (e: MouseEvent, path: string) => void;
   onOpenHoverPreview: (e: MouseEvent, note: NoteMeta) => void;
   onMoveHoverPreview: (e: MouseEvent) => void;
   onCloseHoverPreview: () => void;
@@ -49,6 +50,7 @@ export function Sidebar(props: SidebarProps) {
     onOpenSettings,
     onOpenNote,
     onOpenContextMenu,
+    onOpenContextMenuForPath,
     onOpenHoverPreview,
     onMoveHoverPreview,
     onCloseHoverPreview,
@@ -244,6 +246,7 @@ export function Sidebar(props: SidebarProps) {
                           : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                       }`}
                       onClick={() => onOpenNote(r.path, r)}
+                      onContextMenu={(e) => onOpenContextMenuForPath(e, r.path)}
                       title={messages.sidebar.lineHit(r.line, r.text)}
                     >
                       {messages.sidebar.lineHit(r.line, r.text)}

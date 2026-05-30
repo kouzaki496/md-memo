@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { NoteDetail, NoteMeta, SearchHit } from "@/types/note";
 import { buildShortcutMemoContent } from "@/config/shortcutMemo";
+import { compareNoteRecency } from "@/lib/noteRecency";
 import { isSystemNoteFileName, isSystemNotePath } from "@/lib/systemNotes";
 import { formatAppError } from "@/lib/appError";
 import { messages } from "@/lib/messages";
@@ -31,8 +32,14 @@ export function useNotesData(notesInitEnabled: boolean) {
   const [maxChars, setMaxChars] = useState("");
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
 
-  const pinned = useMemo(() => notes.filter((n) => n.pinned), [notes]);
-  const recent = useMemo(() => notes.filter((n) => !n.pinned).slice(0, 10), [notes]);
+  const pinned = useMemo(
+    () => notes.filter((n) => n.pinned).sort(compareNoteRecency),
+    [notes]
+  );
+  const recent = useMemo(
+    () => notes.filter((n) => !n.pinned).sort(compareNoteRecency).slice(0, 10),
+    [notes]
+  );
 
   const filteredDetails = useMemo(() => {
     const q = managerQuery.trim();

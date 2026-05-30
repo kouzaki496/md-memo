@@ -1,6 +1,7 @@
 //! ブラウザ提示（localhost HTTP + SSE）。表示は 1 タブ（viewer）に集約。
 
 use crate::app_error::{self, err, io, with_detail};
+use crate::attachments;
 use axum::{
     extract::{Path, State},
     http::{header, StatusCode},
@@ -17,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     net::SocketAddr,
+    path::PathBuf,
     sync::{Arc, OnceLock},
     time::Duration,
 };
@@ -100,6 +102,7 @@ struct PresentationInner {
     theme_preset: RwLock<String>,
     app_shutdown: RwLock<bool>,
     display_scroll_ratio: RwLock<f64>,
+    notes_root: RwLock<Option<PathBuf>>,
     viewer_tx: broadcast::Sender<ViewerEvent>,
 }
 
@@ -121,6 +124,7 @@ fn presentation() -> &'static AppPresentation {
             theme_preset: RwLock::new("default".to_string()),
             app_shutdown: RwLock::new(false),
             display_scroll_ratio: RwLock::new(0.0),
+            notes_root: RwLock::new(None),
             viewer_tx,
         }))
     })
@@ -132,6 +136,24 @@ fn memo_key(path: &Option<String>) -> String {
 
 fn note_body_to_html(body: &str) -> String {
     crate::preview_render::render_note_body_html(body)
+}
+
+async fn note_body_to_viewer_html(body: &str, state: &AppPresentation) -> String {
+    let html = note_body_to_html(body);
+    if !*state.0.server_started.lock().await {
+        return html;
+    }
+    let port = *state.0.port.lock().await;
+    let token = state.0.viewer_token.lock().await.clone();
+    let base = format!("http://127.0.0.1:{port}/view/{token}/attachments");
+    let notes_root = state.0.notes_root.read().await.clone();
+    attachments::rewrite_attachment_imgs_for_viewer(&html, &base, notes_root.as_deref())
+}
+
+async fn cache_notes_root(state: &AppPresentation, app: &tauri::AppHandle) {
+    if let Ok(root) = attachments::notes_root(app) {
+        *state.0.notes_root.write().await = Some(root);
+    }
 }
 
 fn generate_token() -> String {
@@ -266,6 +288,7 @@ async fn ensure_server_running(state: AppPresentation) -> Result<(), String> {
         .route("/view/:token/favicon.png", get(viewer_favicon_handler))
         .route("/view/:token/snapshot", get(viewer_snapshot_handler))
         .route("/view/:token/events", get(viewer_events_handler))
+        .route("/view/:token/attachments/:file", get(viewer_attachment_handler))
         .with_state(router_state);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
@@ -322,6 +345,34 @@ async fn viewer_favicon_handler(
         StatusCode::OK,
         [(header::CONTENT_TYPE, "image/png")],
         VIEWER_FAVICON_PNG,
+    )
+        .into_response()
+}
+
+async fn viewer_attachment_handler(
+    State(state): State<AppPresentation>,
+    Path((token, file)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if !viewer_token_valid(&state, &token).await {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let notes_root = state.0.notes_root.read().await.clone();
+    let Some(notes_root) = notes_root else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let path = match attachments::resolve_attachment_file(&notes_root, &file) {
+        Ok(p) => p,
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let bytes = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let mime = attachments::mime_from_path(&path);
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, mime)],
+        bytes,
     )
         .into_response()
 }
@@ -449,6 +500,13 @@ fn viewer_html(token: &str) -> String {
     .prose code {{ font-family: ui-monospace, monospace; font-size: 0.9em; }}
     .prose table {{ border-collapse: collapse; width: 100%; }}
     .prose th, .prose td {{ border: 1px solid var(--border); padding: 0.35rem 0.6rem; }}
+    .prose img {{ max-width: 100%; height: auto; border-radius: 0.375rem; margin: 0.75rem 0; }}
+    .md-image-missing {{ margin: 0.75rem 0; }}
+    .md-image-missing__inner {{ display: flex; flex-direction: column; align-items: center; gap: 0.35rem; padding: 1.25rem 1rem; border: 1px dashed color-mix(in oklab, var(--border) 88%, var(--background)); border-radius: 0.375rem; background: color-mix(in oklab, var(--muted) 42%, var(--background)); text-align: center; }}
+    .md-image-missing__icon {{ color: var(--muted-foreground); }}
+    .md-image-missing__label {{ margin: 0; font-size: 0.8125rem; font-weight: 500; color: var(--muted-foreground); }}
+    .md-image-missing__alt {{ margin: 0; max-width: 100%; font-size: 0.8125rem; color: var(--foreground); }}
+    .md-image-missing__path {{ margin: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, monospace; font-size: 0.6875rem; color: color-mix(in oklab, var(--muted-foreground) 88%, var(--foreground)); }}
     .md-callout {{ display: flex; gap: 0.65rem; margin: 1rem 0; padding: 0.85rem 1rem; border-radius: 0.5rem; border: 1px solid transparent; }}
     .md-callout__label {{ flex: 0 0 auto; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 0.15rem; }}
     .md-callout__body {{ flex: 1; min-width: 0; }}
@@ -597,9 +655,10 @@ pub async fn start_presentation(
 ) -> Result<StartPresentationResult, String> {
     let state = presentation().clone();
     ensure_server_running(state.clone()).await?;
+    cache_notes_root(&state, &app).await;
 
     let key = memo_key(&bound_path);
-    let body_html = note_body_to_html(&body);
+    let body_html = note_body_to_viewer_html(&body, &state).await;
     let url = viewer_url_for_state(&state).await;
     let viewer_token = state.0.viewer_token.lock().await.clone();
 
@@ -693,7 +752,7 @@ pub async fn push_presentation_update(
     if !session.active {
         return Err(err(app_error::PRESENTATION_ALREADY_ENDED));
     }
-    session.body_html = note_body_to_html(&body);
+    session.body_html = note_body_to_viewer_html(&body, state).await;
     drop(sessions);
     emit_viewer_if_displayed(state, &key).await;
     Ok(())

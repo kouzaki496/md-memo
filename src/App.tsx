@@ -43,7 +43,9 @@ import {
   syncPresentationTheme,
 } from "@/lib/presentation";
 import { formatAppError } from "@/lib/appError";
+import { confirmUser } from "@/lib/confirmUser";
 import { DEFAULT_NOTES_DIR, isSetupCompleted, needsInitialSetup } from "@/lib/config";
+import { isSettingsConfigDirty } from "@/lib/settingsCompare";
 import { applyTheme, applyThemePreset } from "@/lib/theme";
 import { PresentationBar } from "@/components/app/PresentationBar";
 import { PresentationScopeHint } from "@/components/app/PresentationScopeHint";
@@ -96,10 +98,20 @@ function App() {
     [activePresentations]
   );
 
-  const isSettingsDirty = useMemo(() => {
-    if (!configDraft || savedSettingsSnapshot == null) return false;
-    return JSON.stringify(configDraft) !== savedSettingsSnapshot;
-  }, [configDraft, savedSettingsSnapshot]);
+  const isSettingsDirty = useMemo(
+    () => isSettingsConfigDirty(configDraft, savedSettingsSnapshot),
+    [configDraft, savedSettingsSnapshot]
+  );
+
+  const setConfigDraftLive = (next: AppConfig) => {
+    configDraftRef.current = next;
+    setConfigDraft(next);
+  };
+
+  const setSavedSettingsSnapshotLive = (snapshot: string) => {
+    savedSettingsSnapshotRef.current = snapshot;
+    setSavedSettingsSnapshot(snapshot);
+  };
 
   const {
     query,
@@ -135,7 +147,13 @@ function App() {
   const presentationScrollTimerRef = useRef<number | null>(null);
   const lastPresentationScrollRatioRef = useRef<number | null>(null);
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
+  const configDraftRef = useRef<AppConfig | null>(null);
+  const savedSettingsSnapshotRef = useRef<string | null>(null);
+  const isSettingsModeRef = useRef(false);
   const activePresentationsRef = useRef(activePresentations);
+  configDraftRef.current = configDraft;
+  savedSettingsSnapshotRef.current = savedSettingsSnapshot;
+  isSettingsModeRef.current = isSettingsMode;
   activePresentationsRef.current = activePresentations;
   const currentFileName = useMemo(() => {
     if (!currentPath) return "新規メモ";
@@ -213,8 +231,8 @@ function App() {
     };
     applyTheme(merged.themeMode);
     applyThemePreset(merged.themePreset);
-    setConfigDraft(merged);
-    setSavedSettingsSnapshot(JSON.stringify(merged));
+    setConfigDraftLive(merged);
+    setSavedSettingsSnapshotLive(JSON.stringify(merged));
     return merged;
   };
 
@@ -385,6 +403,7 @@ function App() {
 
   const createNew = () => {
     void (async () => {
+      if (!(await exitSettingsIfAllowed())) return;
       if (isEditMode) {
         await flushSave();
         await releaseEditLock();
@@ -393,7 +412,6 @@ function App() {
       setCurrentPath(null);
       setActiveHit(null);
       setIsManageMode(false);
-      setIsSettingsMode(false);
       try {
         await acquireEditLock(null);
         setIsEditMode(true);
@@ -405,6 +423,7 @@ function App() {
   };
 
   const openNote = async (path: string, hit?: SearchHit) => {
+    if (!(await exitSettingsIfAllowed())) return;
     if (isEditMode) {
       await flushSave();
       await releaseEditLock();
@@ -416,7 +435,6 @@ function App() {
       setActiveHit(hit ?? null);
       setIsEditMode(false);
       setIsManageMode(false);
-      setIsSettingsMode(false);
       setStatus(messages.status.loaded);
     } catch (err) {
       console.error(err);
@@ -486,8 +504,8 @@ function App() {
       await invoke("save_config", { config: payload });
       applyTheme(payload.themeMode);
       applyThemePreset(payload.themePreset);
-      setConfigDraft(payload);
-      setSavedSettingsSnapshot(JSON.stringify(payload));
+      setConfigDraftLive(payload);
+      setSavedSettingsSnapshotLive(JSON.stringify(payload));
       setStatus(messages.firstRun.completed);
     } catch (err) {
       setStatus(formatAppError(err));
@@ -507,8 +525,8 @@ function App() {
       await invoke("save_config", { config: payload });
       applyTheme(payload.themeMode);
       applyThemePreset(payload.themePreset);
-      setConfigDraft(payload);
-      setSavedSettingsSnapshot(JSON.stringify(payload));
+      setConfigDraftLive(payload);
+      setSavedSettingsSnapshotLive(JSON.stringify(payload));
       await Promise.all([loadNotes(), loadNoteDetails()]);
       setStatus(messages.status.settingsSaved);
     } catch (err) {
@@ -532,7 +550,7 @@ function App() {
     if (!isSettingsDirty) {
       await loadConfig();
     } else if (configDraft) {
-      setConfigDraft({
+      setConfigDraftLive({
         ...configDraft,
         templateTags: ensureLockedInboxInTemplateTags(
           dedupeTagsCaseInsensitive(replaceTagTokenInList(configDraft.templateTags, from, to))
@@ -545,7 +563,7 @@ function App() {
   const addOrphanToTemplate = (tag: string) => {
     if (!configDraft) return;
     if (configDraft.templateTags.some((t) => t.toLowerCase() === tag.toLowerCase())) return;
-    setConfigDraft({
+    setConfigDraftLive({
       ...configDraft,
       templateTags: ensureLockedInboxInTemplateTags([...configDraft.templateTags, tag]),
     });
@@ -560,9 +578,9 @@ function App() {
         ...configDraft,
         templateTags: ensureLockedInboxInTemplateTags(res.templateTags),
       };
-      setConfigDraft(nextConfig);
+      setConfigDraftLive(nextConfig);
       if (!isSettingsDirty) {
-        setSavedSettingsSnapshot(JSON.stringify(nextConfig));
+        setSavedSettingsSnapshotLive(JSON.stringify(nextConfig));
       }
     }
     await Promise.all([loadNotes(), loadNoteDetails()]);
@@ -573,27 +591,42 @@ function App() {
     setStatus(messages.status.tagRemoved(tag, res.filesChanged));
   };
 
-  const closeSettings = () => {
-    if (isSettingsDirty) {
-      const ok = window.confirm(messages.confirm.settingsDiscard);
-      if (!ok) return;
+  const discardSettingsChanges = () => {
+    const snapshot = savedSettingsSnapshotRef.current;
+    if (!snapshot) return;
+    try {
+      const restored = JSON.parse(snapshot) as AppConfig;
+      const normalized: AppConfig = {
+        ...restored,
+        themeMode: restored.themeMode ?? (restored.darkMode ? "dark" : "light"),
+        themePreset: restored.themePreset ?? "default",
+      };
+      setConfigDraftLive(normalized);
+      applyTheme(normalized.themeMode);
+      applyThemePreset(normalized.themePreset);
+    } catch {
+      /* ignore */
     }
-    if (savedSettingsSnapshot) {
-      try {
-        const restored = JSON.parse(savedSettingsSnapshot) as AppConfig;
-        const normalized: AppConfig = {
-          ...restored,
-          themeMode: restored.themeMode ?? (restored.darkMode ? "dark" : "light"),
-          themePreset: restored.themePreset ?? "default",
-        };
-        setConfigDraft(normalized);
-        applyTheme(normalized.themeMode);
-        applyThemePreset(normalized.themePreset);
-      } catch {
-        /* ignore */
-      }
+  };
+
+  const exitSettingsIfAllowed = async (): Promise<boolean> => {
+    if (!isSettingsModeRef.current) return true;
+    const dirty = isSettingsConfigDirty(
+      configDraftRef.current,
+      savedSettingsSnapshotRef.current
+    );
+    if (dirty) {
+      const ok = await confirmUser(messages.confirm.settingsDiscard);
+      if (!ok) return false;
+      discardSettingsChanges();
     }
+    isSettingsModeRef.current = false;
     setIsSettingsMode(false);
+    return true;
+  };
+
+  const closeSettings = () => {
+    void exitSettingsIfAllowed();
   };
 
   const toggleTemplateTag = (rawTag: string) => {
@@ -611,6 +644,37 @@ function App() {
     e.preventDefault();
     e.stopPropagation();
     setContextMenu({ note, x: e.clientX, y: e.clientY });
+  };
+
+  const noteMetaFromPath = (path: string): NoteMeta => {
+    const fromNotes = notes.find((n) => n.path === path);
+    if (fromNotes) return fromNotes;
+    const fromDetail = filteredDetails.find((n) => n.path === path);
+    if (fromDetail) {
+      return {
+        path: fromDetail.path,
+        title: fromDetail.title,
+        pinned: fromDetail.pinned,
+        systemNote: fromDetail.systemNote,
+        tags: fromDetail.tags,
+        updatedMs: fromDetail.updatedMs,
+        createdMs: fromDetail.createdMs,
+      };
+    }
+    const parts = path.split(/[/\\]/);
+    return {
+      path,
+      title: parts[parts.length - 1] || path,
+      pinned: false,
+      systemNote: isSystemNotePath(path),
+      tags: [],
+      updatedMs: 0,
+      createdMs: 0,
+    };
+  };
+
+  const openContextMenuForPath = (e: MouseEvent, path: string) => {
+    openContextMenu(e, noteMetaFromPath(path));
   };
 
   const pinOrUnpinNote = async (note: NoteMeta) => {
@@ -657,6 +721,8 @@ function App() {
         pinned: false,
         systemNote: isSystemNotePath(currentPath),
         tags: [],
+        updatedMs: 0,
+        createdMs: 0,
       };
     void deleteNote(meta);
   };
@@ -951,18 +1017,19 @@ function App() {
               onCreateNew={createNew}
               onOpenManager={() => {
                 void (async () => {
+                  if (!(await exitSettingsIfAllowed())) return;
                   if (isEditMode) {
                     await flushSave();
                     await releaseEditLock();
                     setIsEditMode(false);
                   }
-                  setIsSettingsMode(false);
                   await openManager();
                 })();
               }}
               onOpenSettings={() => void openSettings()}
               onOpenNote={(path, hit) => void openNote(path, hit)}
               onOpenContextMenu={openContextMenu}
+              onOpenContextMenuForPath={openContextMenuForPath}
               onOpenHoverPreview={openHoverPreview}
               onMoveHoverPreview={moveHoverPreview}
               onCloseHoverPreview={closeHoverPreview}
@@ -1026,7 +1093,7 @@ function App() {
             isSaving={isSavingConfig}
             hasUnsavedChanges={isSettingsDirty}
             onChangeConfig={(next) => {
-              setConfigDraft(next);
+              setConfigDraftLive(next);
               applyTheme(next.themeMode);
               applyThemePreset(next.themePreset);
               if (activePresentations.length > 0) {
@@ -1057,6 +1124,9 @@ function App() {
             onDeleteSelected={() => void deleteSelected()}
             onToggleSelect={toggleSelect}
             onOpenNote={(path) => void openNote(path)}
+            onOpenInNewWindow={handleOpenInNewWindow}
+            onPinOrUnpin={(note) => void pinOrUnpinNote(note)}
+            onDelete={(note) => void deleteNote(note)}
             onOpenHoverPreview={openHoverPreview}
             onMoveHoverPreview={moveHoverPreview}
             onCloseHoverPreview={closeHoverPreview}

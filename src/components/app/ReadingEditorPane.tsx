@@ -1,4 +1,6 @@
 import {
+  type ClipboardEvent,
+  type DragEvent,
   type KeyboardEvent,
   type MouseEvent,
   type RefObject,
@@ -20,6 +22,7 @@ import {
   ChevronDown,
   ChevronRight,
   Eye,
+  ImagePlus,
   Lightbulb,
   Lock,
   Minus,
@@ -40,7 +43,18 @@ import {
 } from "@/lib/noteTags";
 import { isBuiltinReservedTagName } from "@/lib/reservedTags";
 import { messages } from "@/lib/messages";
+import {
+  buildImageMarkdown,
+  clipboardMayContainImage,
+  importImageFromDialog,
+  importImagePath,
+  insertTextAtSelection,
+  readClipboardImageFile,
+  saveImageFile,
+  useTauriImageDrop,
+} from "@/lib/noteImages";
 import { cn } from "@/lib/utils";
+import { MarkdownPreviewImage } from "@/components/app/MarkdownPreviewImage";
 
 const toolbarBtn =
   "rounded-md border border-border bg-background shadow-sm hover:bg-muted/80 hover:text-foreground";
@@ -67,6 +81,10 @@ function normalizeExternalBrowserHref(href: string): string | null {
 }
 
 const markdownPreviewComponents: Partial<Components> = {
+  img({ src, alt, node: _n, ...props }) {
+    if (!src) return null;
+    return <MarkdownPreviewImage src={src} alt={alt} {...props} />;
+  },
   a({ href, children, node: _n, ...props }) {
     return (
       <a
@@ -645,6 +663,102 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
     });
   };
 
+  const insertImageMarkdownAtCursor = (
+    textarea: HTMLTextAreaElement,
+    relativePath: string
+  ) => {
+    const markdown = buildImageMarkdown(relativePath);
+    const { nextText, nextCursor } = insertTextAtSelection(
+      textarea.value,
+      textarea.selectionStart,
+      textarea.selectionEnd,
+      markdown
+    );
+    applyEditorTextAndCursor(textarea, nextText, nextCursor);
+  };
+
+  const handleInsertImageFromFile = async (
+    file: File,
+    textarea: HTMLTextAreaElement | null
+  ) => {
+    try {
+      const relativePath = await saveImageFile(file);
+      const ta = textarea ?? editorRef.current;
+      if (!ta) return;
+      insertImageMarkdownAtCursor(ta, relativePath);
+    } catch {
+      window.alert(messages.editor.imageInsertFailed);
+    }
+  };
+
+  const handleInsertImageClick = async () => {
+    const textarea = editorRef.current;
+    if (!textarea || isReadOnly) return;
+    try {
+      const relativePath = await importImageFromDialog();
+      if (!relativePath) return;
+      insertImageMarkdownAtCursor(textarea, relativePath);
+    } catch {
+      window.alert(messages.editor.imageInsertFailed);
+    }
+  };
+
+  const handleTauriImageDrop = useCallback(
+    async (paths: string[]) => {
+      const textarea = editorRef.current;
+      if (!textarea || isReadOnly) return;
+      for (const path of paths) {
+        try {
+          const relativePath = await importImagePath(path);
+          insertImageMarkdownAtCursor(textarea, relativePath);
+        } catch {
+          window.alert(messages.editor.imageInsertFailed);
+          break;
+        }
+      }
+    },
+    [isReadOnly]
+  );
+
+  useTauriImageDrop(isEditMode && !isReadOnly, handleTauriImageDrop);
+
+  const handleEditorPaste = async (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (isReadOnly) return;
+    if (!clipboardMayContainImage(e.clipboardData)) return;
+    e.preventDefault();
+    const textarea = e.currentTarget;
+    const file = await readClipboardImageFile(e.clipboardData);
+    if (!file) {
+      window.alert(messages.editor.imageInsertFailed);
+      return;
+    }
+    await handleInsertImageFromFile(file, textarea);
+  };
+
+  const handleEditorDragOver = (e: DragEvent<HTMLTextAreaElement>) => {
+    if (isReadOnly) return;
+    const types = e.dataTransfer.types;
+    if (types.includes("Files") || types.includes("application/x-moz-file")) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+    }
+  };
+
+  const handleEditorDrop = async (e: DragEvent<HTMLTextAreaElement>) => {
+    if (isReadOnly) return;
+    e.preventDefault();
+    const textarea = e.currentTarget;
+    const files = e.dataTransfer.files;
+    if (!files?.length) return;
+    for (let i = 0; i < files.length; i += 1) {
+      const file = files[i];
+      if (!file.type.startsWith("image/") && !/\.(png|jpe?g|gif|webp|svg)$/i.test(file.name)) {
+        continue;
+      }
+      await handleInsertImageFromFile(file, textarea);
+    }
+  };
+
   const handleBoldShortcut = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     const textarea = e.currentTarget;
     const text = textarea.value;
@@ -1148,6 +1262,19 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
               {messages.editor.editorTitle} — {currentFileName}
             </span>
             <div className="flex items-center gap-1">
+              {!isReadOnly && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-sm"
+                  className={toolbarBtn}
+                  title={messages.editor.insertImage}
+                  aria-label={messages.editor.insertImage}
+                  onClick={() => void handleInsertImageClick()}
+                >
+                  <ImagePlus className="h-4 w-4" />
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="outline"
@@ -1214,6 +1341,9 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
                 onChangeInput(e.target.value);
               }}
               onKeyDown={handleEditorKeyDown}
+              onPaste={(e) => void handleEditorPaste(e)}
+              onDragOver={handleEditorDragOver}
+              onDrop={(e) => void handleEditorDrop(e)}
               onScroll={handleEditorScroll}
               onWheel={(e) => handleScaleWheel(e, onAdjustContentScale)}
               style={{

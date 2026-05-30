@@ -22,6 +22,8 @@ pub struct NoteMeta {
     pub pinned: bool,
     pub system_note: bool,
     pub tags: Vec<String>,
+    pub updated_ms: i64,
+    pub created_ms: i64,
 }
 
 #[derive(Serialize)]
@@ -42,6 +44,7 @@ pub struct NoteDetail {
     pub tags: Vec<String>,
     pub char_count: usize,
     pub updated_ms: i64,
+    pub created_ms: i64,
     pub preview: String,
 }
 
@@ -57,6 +60,52 @@ fn term_matches_line(line: &str, term: &str) -> bool {
 fn resolve_notes_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let cfg = config::load_config(app);
     config::resolve_notes_dir_path(app, &cfg.notes_dir)
+}
+
+fn system_time_to_ms(time: std::time::SystemTime) -> i64 {
+    time.duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn file_timestamps_ms(path: &Path) -> (i64, i64) {
+    let Some(meta) = fs::metadata(path).ok() else {
+        return (0, 0);
+    };
+    let updated_ms = meta
+        .modified()
+        .ok()
+        .map(system_time_to_ms)
+        .unwrap_or(0);
+    let created_ms = meta
+        .created()
+        .ok()
+        .map(system_time_to_ms)
+        .unwrap_or(updated_ms);
+    (updated_ms, created_ms)
+}
+
+fn collect_markdown_paths(notes_root: &Path) -> Result<Vec<PathBuf>, String> {
+    let paths: Vec<PathBuf> = WalkDir::new(notes_root)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .map(|e| e.path().to_path_buf())
+        .filter(|p| p.extension().map(|ext| ext == "md").unwrap_or(false))
+        .filter(|p| p.is_file())
+        .collect();
+    Ok(paths)
+}
+
+fn sort_paths_by_recency(paths: &mut [PathBuf]) {
+    paths.sort_by(|a, b| {
+        let (au, ac) = file_timestamps_ms(a);
+        let (bu, bc) = file_timestamps_ms(b);
+        bu.cmp(&au)
+            .then_with(|| bc.cmp(&ac))
+            .then_with(|| a.cmp(b))
+    });
 }
 
 fn parse_tags_from_content(content: &str) -> Vec<String> {
@@ -168,16 +217,8 @@ pub fn list_notes(app: tauri::AppHandle) -> Result<Vec<NoteMeta>, String> {
     let notes_root = resolve_notes_root(&app)?;
     fs::create_dir_all(&notes_root).map_err(|e| io(app_error::NOTES_DIR_CREATE_FAILED, e))?;
 
-    let mut paths: Vec<PathBuf> = WalkDir::new(&notes_root)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .map(|e| e.path().to_path_buf())
-        .filter(|p| p.extension().map(|ext| ext == "md").unwrap_or(false))
-        .filter(|p| p.is_file())
-        .collect();
-
-    paths.sort_by(|a, b| b.cmp(a));
+    let mut paths = collect_markdown_paths(&notes_root)?;
+    sort_paths_by_recency(&mut paths);
 
     Ok(paths
         .into_iter()
@@ -193,12 +234,15 @@ pub fn list_notes(app: tauri::AppHandle) -> Result<Vec<NoteMeta>, String> {
                 .ok()
                 .map(|content| parse_tags_from_content(&content))
                 .unwrap_or_default();
+            let (updated_ms, created_ms) = file_timestamps_ms(&path);
             NoteMeta {
                 path: path_str,
                 title,
                 pinned,
                 system_note: system_notes::is_system_note_path(&path),
                 tags,
+                updated_ms,
+                created_ms,
             }
         })
         .collect())
@@ -210,15 +254,8 @@ pub fn list_notes_detail(app: tauri::AppHandle) -> Result<Vec<NoteDetail>, Strin
     let notes_root = resolve_notes_root(&app)?;
     fs::create_dir_all(&notes_root).map_err(|e| io(app_error::NOTES_DIR_CREATE_FAILED, e))?;
 
-    let mut paths: Vec<PathBuf> = WalkDir::new(&notes_root)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .map(|e| e.path().to_path_buf())
-        .filter(|p| p.extension().map(|ext| ext == "md").unwrap_or(false))
-        .filter(|p| p.is_file())
-        .collect();
-    paths.sort_by(|a, b| b.cmp(a));
+    let mut paths = collect_markdown_paths(&notes_root)?;
+    sort_paths_by_recency(&mut paths);
 
     let details = paths
         .into_iter()
@@ -234,12 +271,7 @@ pub fn list_notes_detail(app: tauri::AppHandle) -> Result<Vec<NoteDetail>, Strin
             let tags = parse_tags_from_content(&content);
             let char_count = content.chars().count();
             let preview = content.lines().take(2).collect::<Vec<_>>().join(" / ");
-            let updated_ms = fs::metadata(&path)
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_millis() as i64)
-                .unwrap_or(0);
+            let (updated_ms, created_ms) = file_timestamps_ms(&path);
             NoteDetail {
                 path: path_str,
                 title,
@@ -248,6 +280,7 @@ pub fn list_notes_detail(app: tauri::AppHandle) -> Result<Vec<NoteDetail>, Strin
                 tags,
                 char_count,
                 updated_ms,
+                created_ms,
                 preview,
             }
         })

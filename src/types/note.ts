@@ -4,6 +4,8 @@ export type NoteMeta = {
   pinned: boolean;
   systemNote: boolean;
   tags: string[];
+  updatedMs: number;
+  createdMs: number;
 };
 
 export type SearchHit = {
@@ -20,6 +22,7 @@ export type NoteDetail = {
   tags: string[];
   charCount: number;
   updatedMs: number;
+  createdMs: number;
   preview: string;
 };
 
