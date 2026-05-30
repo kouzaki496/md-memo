@@ -8,6 +8,7 @@ import {
   getTagToggleBlockedMessage,
   toggleTagInContent,
 } from "@/lib/noteTags";
+import { formatAppError } from "@/lib/appError";
 import { messages } from "@/lib/messages";
 import { acquireEditLock, releaseEditLock } from "@/lib/editLock";
 import { applyTheme, applyThemePreset } from "@/lib/theme";
@@ -66,8 +67,7 @@ export function NoteWindowApp({ notePath }: NoteWindowAppProps) {
         await getCurrentWindow().setTitle(currentFileName);
       } catch (err) {
         console.error(err);
-        const msg = err instanceof Error ? err.message : String(err);
-        setStatus(messages.status.openNoteFailed(msg));
+        setStatus(formatAppError(err));
       }
     },
     [notePath, currentFileName, isEditMode]
@@ -86,7 +86,7 @@ export function NoteWindowApp({ notePath }: NoteWindowAppProps) {
       setStatus(messages.status.saved);
     } catch (err) {
       console.error(err);
-      setStatus(messages.status.saveFailed);
+      setStatus(formatAppError(err));
     }
   };
 
@@ -133,7 +133,7 @@ export function NoteWindowApp({ notePath }: NoteWindowAppProps) {
         })
         .catch((err) => {
           console.error(err);
-          setStatus(messages.status.saveFailed);
+          setStatus(formatAppError(err));
         });
     }, 500);
 

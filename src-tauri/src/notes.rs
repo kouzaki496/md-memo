@@ -1,5 +1,6 @@
 //! メモの検索・保存
 
+use crate::app_error::{self, err, io, with_detail};
 use crate::config;
 use crate::system_notes;
 use rayon::prelude::*;
@@ -10,7 +11,6 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use tauri::path::BaseDirectory;
 use tauri::Manager;
 use walkdir::WalkDir;
 
@@ -56,13 +56,7 @@ fn term_matches_line(line: &str, term: &str) -> bool {
 
 fn resolve_notes_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let cfg = config::load_config(app);
-    if PathBuf::from(&cfg.notes_dir).is_absolute() {
-        Ok(PathBuf::from(&cfg.notes_dir))
-    } else {
-        app.path()
-            .resolve(&cfg.notes_dir, BaseDirectory::Document)
-            .map_err(|e| e.to_string())
-    }
+    config::resolve_notes_dir_path(app, &cfg.notes_dir)
 }
 
 fn parse_tags_from_content(content: &str) -> Vec<String> {
@@ -172,7 +166,7 @@ fn search_in_file(path: &PathBuf, terms: &[String]) -> std::io::Result<Vec<Searc
 pub fn list_notes(app: tauri::AppHandle) -> Result<Vec<NoteMeta>, String> {
     let cfg = config::load_config(&app);
     let notes_root = resolve_notes_root(&app)?;
-    fs::create_dir_all(&notes_root).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&notes_root).map_err(|e| io(app_error::NOTES_DIR_CREATE_FAILED, e))?;
 
     let mut paths: Vec<PathBuf> = WalkDir::new(&notes_root)
         .into_iter()
@@ -214,7 +208,7 @@ pub fn list_notes(app: tauri::AppHandle) -> Result<Vec<NoteMeta>, String> {
 pub fn list_notes_detail(app: tauri::AppHandle) -> Result<Vec<NoteDetail>, String> {
     let cfg = config::load_config(&app);
     let notes_root = resolve_notes_root(&app)?;
-    fs::create_dir_all(&notes_root).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&notes_root).map_err(|e| io(app_error::NOTES_DIR_CREATE_FAILED, e))?;
 
     let mut paths: Vec<PathBuf> = WalkDir::new(&notes_root)
         .into_iter()
@@ -265,21 +259,18 @@ pub fn list_notes_detail(app: tauri::AppHandle) -> Result<Vec<NoteDetail>, Strin
 pub fn read_note(path: String) -> Result<String, String> {
     let p = PathBuf::from(&path);
     if !p.is_file() {
-        return Err(format!(
-            "メモが見つかりません（別PCでは「ドキュメント」内のメモフォルダをコピーするか、設定で保存先を合わせてください）: {}",
-            path
-        ));
+        return Err(with_detail(app_error::NOTE_NOT_FOUND, path));
     }
-    fs::read_to_string(&p).map_err(|e| format!("読み込みに失敗しました: {e}"))
+    fs::read_to_string(&p).map_err(|e| io(app_error::NOTE_READ_FAILED, e))
 }
 
 #[tauri::command]
 pub fn delete_note(app: tauri::AppHandle, path: String) -> Result<(), String> {
     let p = PathBuf::from(&path);
     if system_notes::is_system_note_path(&p) {
-        return Err("このメモは削除できません（アプリ付属のメモです）".to_string());
+        return Err(err(app_error::BUILTIN_NOTE_NO_DELETE));
     }
-    fs::remove_file(&path).map_err(|e| e.to_string())?;
+    fs::remove_file(&path).map_err(|e| io(app_error::FILE_DELETE_FAILED, e))?;
 
     let mut cfg = config::load_config(&app);
     cfg.pinned_paths.retain(|p| p != &path);
@@ -315,7 +306,7 @@ pub fn delete_notes(app: tauri::AppHandle, paths: Vec<String>) -> Result<usize, 
 #[tauri::command]
 pub fn toggle_pin_note(app: tauri::AppHandle, path: String, pinned: bool) -> Result<(), String> {
     if !pinned && system_notes::is_system_note_path(PathBuf::from(&path).as_path()) {
-        return Err("このメモはピン留め解除できません（アプリ付属のメモです）".to_string());
+        return Err(err(app_error::BUILTIN_NOTE_NO_UNPIN));
     }
     let mut cfg = config::load_config(&app);
     if pinned {
@@ -335,19 +326,19 @@ pub fn save_note(
     current_path: Option<String>,
 ) -> Result<String, String> {
     let notes_root = resolve_notes_root(&app)?;
-    fs::create_dir_all(&notes_root).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&notes_root).map_err(|e| io(app_error::NOTES_DIR_CREATE_FAILED, e))?;
 
     let target_path = if let Some(path_str) = current_path.filter(|p| !p.is_empty()) {
         let p = PathBuf::from(&path_str);
         if system_notes::is_system_note_path(&p) {
-            return Err("このメモは編集できません（閲覧専用です）".to_string());
+            return Err(err(app_error::BUILTIN_NOTE_READ_ONLY));
         }
         if p.is_absolute() {
             p
         } else {
             let name = p
                 .file_name()
-                .ok_or_else(|| "保存先パスが不正です（ファイル名がありません）".to_string())?;
+                .ok_or_else(|| err(app_error::SAVE_PATH_INVALID))?;
             notes_root.join(name)
         }
     } else {
@@ -362,7 +353,7 @@ pub fn save_note(
         path
     };
 
-    fs::write(&target_path, content).map_err(|e| e.to_string())?;
+    fs::write(&target_path, content).map_err(|e| io(app_error::FILE_WRITE_FAILED, e))?;
 
     Ok(target_path.to_string_lossy().into_owned())
 }
@@ -396,12 +387,12 @@ pub async fn open_note_window(app: tauri::AppHandle, path: String) -> Result<(),
     use tauri::{WebviewUrl, WebviewWindowBuilder};
 
     if path.trim().is_empty() {
-        return Err("メモのパスが空です".to_string());
+        return Err(err(app_error::NOTE_PATH_EMPTY));
     }
 
     let label = note_window_label(&path);
     if let Some(existing) = app.get_webview_window(&label) {
-        existing.set_focus().map_err(|e| e.to_string())?;
+        existing.set_focus().map_err(|e| io(app_error::NOTE_WINDOW_OPEN_FAILED, e))?;
         return Ok(());
     }
 
@@ -419,7 +410,7 @@ pub async fn open_note_window(app: tauri::AppHandle, path: String) -> Result<(),
         .inner_size(960.0, 720.0)
         .min_inner_size(480.0, 360.0)
         .build()
-        .map_err(|e| format!("別ウィンドウを開けませんでした: {e}"))?;
+        .map_err(|e| io(app_error::NOTE_WINDOW_OPEN_FAILED, e))?;
 
     Ok(())
 }
@@ -484,7 +475,7 @@ fn merge_required_tags(existing: Vec<String>, required: &[&str]) -> Vec<String> 
 
 /// 既存 reference メモの先頭 tags に `_builtin` と `reference` が無ければ付与する。
 fn ensure_reference_note_builtin_tags(target_path: &Path) -> Result<(), String> {
-    let content = fs::read_to_string(target_path).map_err(|e| e.to_string())?;
+    let content = fs::read_to_string(target_path).map_err(|e| io(app_error::NOTE_READ_FAILED, e))?;
     let required = system_notes::BUILTIN_TAGS_REFERENCE;
     let existing = parse_tags_from_content(&content);
     let next = merge_required_tags(existing.clone(), required);
@@ -504,7 +495,7 @@ fn ensure_reference_note_builtin_tags(target_path: &Path) -> Result<(), String> 
         )
     };
 
-    fs::write(target_path, new_content).map_err(|e| e.to_string())
+    fs::write(target_path, new_content).map_err(|e| io(app_error::FILE_WRITE_FAILED, e))
 }
 
 /// 初回のみ Markdown 構文リファレンスを生成する（削除後は再生成しない）。
@@ -512,7 +503,7 @@ fn ensure_reference_note_builtin_tags(target_path: &Path) -> Result<(), String> 
 pub fn ensure_markdown_reference_note(app: tauri::AppHandle) -> Result<(), String> {
     let cfg = config::load_config(&app);
     let notes_root = resolve_notes_root(&app)?;
-    fs::create_dir_all(&notes_root).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&notes_root).map_err(|e| io(app_error::NOTES_DIR_CREATE_FAILED, e))?;
     let target_path = notes_root.join(MARKDOWN_REFERENCE_FILE_NAME);
 
     if target_path.is_file() {
@@ -541,7 +532,7 @@ pub fn ensure_markdown_reference_note(app: tauri::AppHandle) -> Result<(), Strin
 /// フロントより先に実行し、ショートカット説明メモが無いときだけ用意する（本文更新はフロントが担当）。
 pub fn ensure_editor_shortcuts_note(app: &tauri::AppHandle) -> Result<(), String> {
     let notes_root = resolve_notes_root(app)?;
-    fs::create_dir_all(&notes_root).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&notes_root).map_err(|e| io(app_error::NOTES_DIR_CREATE_FAILED, e))?;
     let target_path = notes_root.join("editor-shortcuts.md");
 
     if target_path.is_file() {
@@ -572,13 +563,13 @@ fn upsert_system_note_inner(
     pin: bool,
 ) -> Result<String, String> {
     let notes_root = resolve_notes_root(app)?;
-    fs::create_dir_all(&notes_root).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&notes_root).map_err(|e| io(app_error::NOTES_DIR_CREATE_FAILED, e))?;
 
     if file_name.trim().is_empty() {
-        return Err("ファイル名が空です".to_string());
+        return Err(err(app_error::FILE_NAME_EMPTY));
     }
     if file_name.contains('/') || file_name.contains('\\') {
-        return Err("ファイル名にパス区切り文字は使えません".to_string());
+        return Err(err(app_error::FILE_NAME_INVALID));
     }
 
     let normalized = if file_name.ends_with(".md") {
@@ -588,7 +579,7 @@ fn upsert_system_note_inner(
     };
 
     let target_path = notes_root.join(normalized);
-    fs::write(&target_path, content).map_err(|e| e.to_string())?;
+    fs::write(&target_path, content).map_err(|e| io(app_error::FILE_WRITE_FAILED, e))?;
 
     if pin {
         let mut cfg = config::load_config(app);
@@ -757,10 +748,10 @@ pub fn replace_tag_globally(
     let from_trim = from_tag.trim();
     let to_trim = to_tag.trim();
     if from_trim.is_empty() {
-        return Err("置換元のタグを入力してください".to_string());
+        return Err(err(app_error::TAG_REPLACE_FROM_EMPTY));
     }
     if to_trim.is_empty() {
-        return Err("置換先のタグを入力してください".to_string());
+        return Err(err(app_error::TAG_REPLACE_TO_EMPTY));
     }
     if from_trim.eq_ignore_ascii_case(to_trim) {
         return Ok(ReplaceTagGloballyResult {
@@ -770,14 +761,14 @@ pub fn replace_tag_globally(
         });
     }
     if system_notes::is_builtin_reserved_tag_name(from_trim) {
-        return Err("アプリ用タグは一括置換できません".to_string());
+        return Err(err(app_error::TAG_REPLACE_FROM_RESERVED));
     }
     if system_notes::is_builtin_reserved_tag_name(to_trim) {
-        return Err("アプリ用タグには置換できません".to_string());
+        return Err(err(app_error::TAG_REPLACE_TO_RESERVED));
     }
 
     let notes_root = resolve_notes_root(&app)?;
-    fs::create_dir_all(&notes_root).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&notes_root).map_err(|e| io(app_error::NOTES_DIR_CREATE_FAILED, e))?;
 
     let mut paths: Vec<PathBuf> = WalkDir::new(&notes_root)
         .into_iter()
@@ -819,7 +810,7 @@ pub fn replace_tag_globally(
         if new_content == content {
             continue;
         }
-        fs::write(path, new_content).map_err(|e| e.to_string())?;
+        fs::write(path, new_content).map_err(|e| io(app_error::FILE_WRITE_FAILED, e))?;
         changed_paths.push(path.to_string_lossy().into_owned());
     }
 
@@ -849,17 +840,17 @@ pub fn replace_tag_globally(
 pub fn remove_tag_globally(app: tauri::AppHandle, tag: String) -> Result<ReplaceTagGloballyResult, String> {
     let target = tag.trim();
     if target.is_empty() {
-        return Err("削除するタグを入力してください".to_string());
+        return Err(err(app_error::TAG_REMOVE_EMPTY));
     }
     if target.eq_ignore_ascii_case(INBOX_TAG) {
-        return Err("「受信箱」タグは外せません".to_string());
+        return Err(err(app_error::TAG_REMOVE_INBOX));
     }
     if system_notes::is_builtin_reserved_tag_name(target) {
-        return Err("アプリ用タグは外せません".to_string());
+        return Err(err(app_error::TAG_REMOVE_RESERVED));
     }
 
     let notes_root = resolve_notes_root(&app)?;
-    fs::create_dir_all(&notes_root).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&notes_root).map_err(|e| io(app_error::NOTES_DIR_CREATE_FAILED, e))?;
 
     let mut paths: Vec<PathBuf> = WalkDir::new(&notes_root)
         .into_iter()
@@ -901,7 +892,7 @@ pub fn remove_tag_globally(app: tauri::AppHandle, tag: String) -> Result<Replace
         if new_content == content {
             continue;
         }
-        fs::write(path, new_content).map_err(|e| e.to_string())?;
+        fs::write(path, new_content).map_err(|e| io(app_error::FILE_WRITE_FAILED, e))?;
         changed_paths.push(path.to_string_lossy().into_owned());
     }
 

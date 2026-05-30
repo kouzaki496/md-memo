@@ -1,5 +1,6 @@
 //! アプリ全体で編集モードを1ウィンドウに限定するロック
 
+use crate::app_error::{self, io};
 use serde::Serialize;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter};
@@ -30,7 +31,7 @@ pub fn acquire_edit_lock(
         note_path,
     };
     {
-        let mut lock = EDIT_LOCK.lock().map_err(|e| e.to_string())?;
+        let mut lock = EDIT_LOCK.lock().map_err(|e| io(app_error::INTERNAL_LOCK_FAILED, e))?;
         *lock = Some(state.clone());
     }
     emit_lock(&app, &state);
@@ -39,7 +40,7 @@ pub fn acquire_edit_lock(
 
 #[tauri::command]
 pub fn release_edit_lock(window_label: String) -> Result<(), String> {
-    let mut lock = EDIT_LOCK.lock().map_err(|e| e.to_string())?;
+    let mut lock = EDIT_LOCK.lock().map_err(|e| io(app_error::INTERNAL_LOCK_FAILED, e))?;
     if lock
         .as_ref()
         .is_some_and(|s| s.holder_label == window_label)

@@ -1,5 +1,6 @@
 //! ブラウザ提示（localhost HTTP + SSE）。表示は 1 タブ（viewer）に集約。
 
+use crate::app_error::{self, err, io, with_detail};
 use axum::{
     extract::{Path, State},
     http::{header, StatusCode},
@@ -255,7 +256,7 @@ async fn ensure_server_running(state: AppPresentation) -> Result<(), String> {
         return Ok(());
     }
 
-    let port = bind_port(DEFAULT_PORT).map_err(|e| format!("提示用サーバーを起動できません: {e}"))?;
+    let port = bind_port(DEFAULT_PORT).map_err(|e| io(app_error::PRESENTATION_SERVER_START_FAILED, e))?;
     *state.0.port.lock().await = port;
     *state.0.viewer_token.lock().await = generate_token();
 
@@ -270,7 +271,7 @@ async fn ensure_server_running(state: AppPresentation) -> Result<(), String> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let listener = tokio::net::TcpListener::bind(addr)
         .await
-        .map_err(|e| format!("提示用サーバーを起動できません: {e}"))?;
+        .map_err(|e| io(app_error::PRESENTATION_SERVER_START_FAILED, e))?;
 
     tauri::async_runtime::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
@@ -290,8 +291,9 @@ fn bind_port(start: u16) -> Result<u16, String> {
             return Ok(port);
         }
     }
-    Err(format!(
-        "ポート {start} 付近に空きがありません（{MAX_PORT_ATTEMPTS} 件試行）"
+    Err(with_detail(
+        app_error::PRESENTATION_PORT_UNAVAILABLE,
+        format!("ポート {start} 付近に空きがありません（{MAX_PORT_ATTEMPTS} 件試行）"),
     ))
 }
 
@@ -435,7 +437,7 @@ fn viewer_html(token: &str) -> String {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" type="image/png" href="/view/{token}/favicon.png">
-  <title>md-memo 提示</title>
+  <title>Scriptax 提示</title>
   <style>
     {theme_css}
     body {{ margin: 0; font-family: "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif; line-height: 1.65; background: var(--background); color: var(--foreground); transition: background-color 0.15s, color 0.15s; }}
@@ -526,13 +528,13 @@ fn viewer_html(token: &str) -> String {
       if (s.appShutdown) {{
         lastDisplayedKey = null;
         hdr.textContent = "提示を停止しました";
-        main.innerHTML = '<p class="ended">md-memo を終了したため、提示を終了しました。</p>';
+        main.innerHTML = '<p class="ended">Scriptax を終了したため、提示を終了しました。</p>';
         closeEventSource();
         return;
       }}
       if (!s.fileName && !s.active && !s.ended) {{
         lastDisplayedKey = null;
-        hdr.textContent = "md-memo 提示";
+        hdr.textContent = "Scriptax 提示";
         main.innerHTML = '<p class="idle">アプリで提示するメモを選ぶと、ここに表示されます。</p>';
         return;
       }}
@@ -609,7 +611,7 @@ pub async fn start_presentation(
                 if open_browser {
                     app.opener()
                         .open_url(&url, None::<&str>)
-                        .map_err(|e| format!("ブラウザを開けませんでした: {e}"))?;
+                        .map_err(|e| io(app_error::BROWSER_OPEN_FAILED, e))?;
                 }
                 return Ok(StartPresentationResult {
                     token: viewer_token,
@@ -640,7 +642,7 @@ pub async fn start_presentation(
     if open_browser {
         app.opener()
             .open_url(&url, None::<&str>)
-            .map_err(|e| format!("ブラウザを開けませんでした: {e}"))?;
+            .map_err(|e| io(app_error::BROWSER_OPEN_FAILED, e))?;
     }
 
     Ok(StartPresentationResult {
@@ -658,10 +660,10 @@ pub async fn set_presentation_display(bound_path: Option<String>) -> Result<(), 
     let key = memo_key(&bound_path);
     let sessions = state.0.sessions.read().await;
     let Some(session) = sessions.get(&key) else {
-        return Err("このメモの提示セッションが開始されていません".into());
+        return Err(err(app_error::PRESENTATION_SESSION_NOT_STARTED));
     };
     if !session.active {
-        return Err("提示はすでに終了しています".into());
+        return Err(err(app_error::PRESENTATION_ALREADY_ENDED));
     }
     drop(sessions);
     set_display_key(state, key).await;
@@ -686,10 +688,10 @@ pub async fn push_presentation_update(
     let key = memo_key(&bound_path);
     let mut sessions = state.0.sessions.write().await;
     let Some(session) = sessions.get_mut(&key) else {
-        return Err("このメモの提示セッションが開始されていません".into());
+        return Err(err(app_error::PRESENTATION_SESSION_NOT_STARTED));
     };
     if !session.active {
-        return Err("提示はすでに終了しています".into());
+        return Err(err(app_error::PRESENTATION_ALREADY_ENDED));
     }
     session.body_html = note_body_to_html(&body);
     drop(sessions);
@@ -706,10 +708,10 @@ pub async fn set_presentation_realtime(
     let key = memo_key(&bound_path);
     let mut sessions = state.0.sessions.write().await;
     let Some(session) = sessions.get_mut(&key) else {
-        return Err("このメモの提示セッションが開始されていません".into());
+        return Err(err(app_error::PRESENTATION_SESSION_NOT_STARTED));
     };
     if !session.active {
-        return Err("提示はすでに終了しています".into());
+        return Err(err(app_error::PRESENTATION_ALREADY_ENDED));
     }
     session.realtime = realtime;
     drop(sessions);
@@ -773,14 +775,14 @@ pub async fn get_presentation_status(
 fn validate_theme_mode(mode: &str) -> Result<(), String> {
     match mode {
         "system" | "light" | "dark" => Ok(()),
-        _ => Err(format!("不正な themeMode: {mode}")),
+        _ => Err(with_detail(app_error::INVALID_THEME_MODE, mode)),
     }
 }
 
 fn validate_theme_preset(preset: &str) -> Result<(), String> {
     match preset {
         "default" | "sepia" | "high-contrast" => Ok(()),
-        _ => Err(format!("不正な themePreset: {preset}")),
+        _ => Err(with_detail(app_error::INVALID_THEME_PRESET, preset)),
     }
 }
 

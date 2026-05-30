@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "md-memo",
+  "productName": "Scriptax",
   "version": "0.1.0",
-  "identifier": "com.kohzaki.md-memo",
+  "identifier": "app.scriptax",
   "build": {
     "beforeDevCommand": {
       "script": "node scripts/tauri-npm.mjs dev",
@@ -19,7 +19,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "md-memo",
+        "title": "Scriptax",
         "width": 800,
         "height": 600,
         "maximized": true

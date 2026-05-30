@@ -88,7 +88,7 @@ const markdownPreviewComponents: Partial<Components> = {
   },
 };
 
-const TAGS_BAR_EXPANDED_KEY = "md-memo-editor-tags-bar-expanded";
+const TAGS_BAR_EXPANDED_KEY = "scriptax-editor-tags-bar-expanded";
 
 function readTagsBarExpanded(): boolean {
   try {

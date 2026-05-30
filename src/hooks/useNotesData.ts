@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { NoteDetail, NoteMeta, SearchHit } from "@/types/note";
 import { buildShortcutMemoContent } from "@/config/shortcutMemo";
 import { isSystemNoteFileName, isSystemNotePath } from "@/lib/systemNotes";
+import { formatAppError } from "@/lib/appError";
 import { messages } from "@/lib/messages";
 
 /** 語に大文字が含まれる場合は大小区別、それ以外は大小区別なし（Rust の search と同趣旨） */
@@ -19,7 +20,7 @@ function isEditorShortcutsNote(n: NoteMeta): boolean {
   return isSystemNoteFileName(n.title);
 }
 
-export function useNotesData() {
+export function useNotesData(notesInitEnabled: boolean) {
   const [query, setQuery] = useState("");
   const [notes, setNotes] = useState<NoteMeta[]>([]);
   const [searchResults, setSearchResults] = useState<SearchHit[]>([]);
@@ -116,36 +117,39 @@ export function useNotesData() {
     await invoke("ensure_markdown_reference_note");
   };
 
-  useEffect(() => {
-    void (async () => {
+  const initializeNotes = useCallback(async () => {
+    try {
+      await ensureShortcutMemo();
+    } catch (err) {
+      console.error(err);
       try {
-        await ensureShortcutMemo();
-      } catch (err) {
-        console.error(err);
-        try {
-          const list = await invoke<NoteMeta[]>("list_notes");
-          if (!list.some(isEditorShortcutsNote)) {
-            setStatus(messages.status.shortcutMemoFailed);
-          }
-        } catch {
+        const list = await invoke<NoteMeta[]>("list_notes");
+        if (!list.some(isEditorShortcutsNote)) {
           setStatus(messages.status.shortcutMemoFailed);
         }
+      } catch {
+        setStatus(messages.status.shortcutMemoFailed);
       }
+    }
 
-      try {
-        await ensureMarkdownReferenceMemo();
-      } catch (err) {
-        console.error(err);
-      }
+    try {
+      await ensureMarkdownReferenceMemo();
+    } catch (err) {
+      console.error(err);
+    }
 
-      try {
-        await loadNotes();
-      } catch (err) {
-        console.error(err);
-        setStatus(messages.status.notesLoadFailed);
-      }
-    })();
+    try {
+      await loadNotes();
+    } catch (err) {
+      console.error(err);
+      setStatus(formatAppError(err));
+    }
   }, []);
+
+  useEffect(() => {
+    if (!notesInitEnabled) return;
+    void initializeNotes();
+  }, [notesInitEnabled, initializeNotes]);
 
   useEffect(() => {
     const q = query.trim();
@@ -159,7 +163,7 @@ export function useNotesData() {
       .then(setSearchResults)
       .catch((err) => {
         console.error(err);
-        setStatus(messages.status.searchFailed);
+        setStatus(formatAppError(err));
       });
   }, [query, notes]);
 
@@ -188,5 +192,6 @@ export function useNotesData() {
     clearSelection,
     deleteSelected,
     openManager,
+    initializeNotes,
   };
 }

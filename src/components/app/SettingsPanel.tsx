@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { ExternalLink, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { AppConfig } from "@/types/config";
@@ -10,7 +11,9 @@ import {
   isInboxTagName,
 } from "@/lib/noteTags";
 import { BUILTIN_RESERVED_TAG, isBuiltinReservedTagName } from "@/lib/reservedTags";
+import { formatAppError } from "@/lib/appError";
 import { messages } from "@/lib/messages";
+import { openNotesDirInExplorer, pickNotesDirFolder, resolveNotesDirPath } from "@/lib/notesDir";
 
 type SettingsPanelProps = {
   config: AppConfig;
@@ -24,6 +27,7 @@ type SettingsPanelProps = {
   onChangeConfig: (next: AppConfig) => void;
   onSave: () => void;
   onClose: () => void;
+  onStatus?: (message: string) => void;
   onReplaceTagGlobally: (from: string, to: string) => Promise<void>;
   onAddOrphanToTemplate: (tag: string) => void;
   onRemoveTagFromAllMemos: (tag: string) => Promise<void>;
@@ -41,6 +45,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
     onChangeConfig,
     onSave,
     onClose,
+    onStatus,
     onReplaceTagGlobally,
     onAddOrphanToTemplate,
     onRemoveTagFromAllMemos,
@@ -50,6 +55,39 @@ export function SettingsPanel(props: SettingsPanelProps) {
   const [replaceTo, setReplaceTo] = useState("");
   const [replaceBusy, setReplaceBusy] = useState(false);
   const [orphanBusy, setOrphanBusy] = useState<string | null>(null);
+  const [notesDirBusy, setNotesDirBusy] = useState(false);
+  const [notesDirOpening, setNotesDirOpening] = useState(false);
+  const [resolvedNotesDir, setResolvedNotesDir] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void resolveNotesDirPath(config.notesDir).then((path) => {
+      if (!cancelled) setResolvedNotesDir(path);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [config.notesDir]);
+
+  const handlePickNotesDir = () => {
+    setNotesDirBusy(true);
+    void pickNotesDirFolder(config.notesDir)
+      .then((selected) => {
+        if (selected) onChangeConfig({ ...config, notesDir: selected });
+      })
+      .catch((err) => console.error(err))
+      .finally(() => setNotesDirBusy(false));
+  };
+
+  const handleOpenNotesDir = () => {
+    setNotesDirOpening(true);
+    void openNotesDirInExplorer(config.notesDir)
+      .catch((err) => {
+        console.error(err);
+        onStatus?.(formatAppError(err));
+      })
+      .finally(() => setNotesDirOpening(false));
+  };
 
   const addTag = () => {
     const normalized = tagDraft.trim().replace(/^#+/, "");
@@ -117,11 +155,39 @@ export function SettingsPanel(props: SettingsPanelProps) {
       <div className="p-4 space-y-5 overflow-y-auto">
         <section className="space-y-2">
           <h3 className="text-sm font-semibold">メモ保存先</h3>
-          <Input
-            value={config.notesDir}
-            onChange={(e) => onChangeConfig({ ...config, notesDir: e.target.value })}
-            placeholder={messages.settings.notesDirPlaceholder}
-          />
+          <div className="flex flex-wrap gap-2">
+            <Input
+              className="min-w-[12rem] flex-1"
+              value={config.notesDir}
+              onChange={(e) => onChangeConfig({ ...config, notesDir: e.target.value })}
+              placeholder={messages.settings.notesDirPlaceholder}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              className="shrink-0"
+              disabled={notesDirBusy || !config.notesDir.trim()}
+              onClick={handleOpenNotesDir}
+            >
+              <ExternalLink className="h-4 w-4" />
+              {messages.settings.notesDirOpen}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="shrink-0"
+              disabled={notesDirBusy || notesDirOpening}
+              onClick={handlePickNotesDir}
+            >
+              <FolderOpen className="h-4 w-4" />
+              {messages.settings.notesDirBrowse}
+            </Button>
+          </div>
+          {resolvedNotesDir && (
+            <p className="text-xs text-muted-foreground break-all">
+              {messages.settings.notesDirResolved(resolvedNotesDir)}
+            </p>
+          )}
           <p className="text-xs text-muted-foreground">{messages.settings.notesDirHint}</p>
         </section>
 

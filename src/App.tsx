@@ -5,6 +5,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { Button } from "@/components/ui/button";
 import { Sidebar } from "@/components/app/Sidebar";
 import { ManagerPanel } from "@/components/app/ManagerPanel";
+import { FirstRunSetupDialog } from "@/components/app/FirstRunSetupDialog";
 import { SettingsPanel } from "@/components/app/SettingsPanel";
 import { ReadingEditorPane } from "@/components/app/ReadingEditorPane";
 import { Overlays } from "@/components/app/Overlays";
@@ -41,6 +42,8 @@ import {
   startPresentation,
   syncPresentationTheme,
 } from "@/lib/presentation";
+import { formatAppError } from "@/lib/appError";
+import { DEFAULT_NOTES_DIR, isSetupCompleted, needsInitialSetup } from "@/lib/config";
 import { applyTheme, applyThemePreset } from "@/lib/theme";
 import { PresentationBar } from "@/components/app/PresentationBar";
 import { PresentationScopeHint } from "@/components/app/PresentationScopeHint";
@@ -73,7 +76,10 @@ function App() {
   const [viewerUrl, setViewerUrl] = useState<string | null>(null);
   const [presentationStartOpen, setPresentationStartOpen] = useState(false);
   const [presentationStartRealtime, setPresentationStartRealtime] = useState(true);
+  const [firstRunNotesDir, setFirstRunNotesDir] = useState(DEFAULT_NOTES_DIR);
   const viewerOpenedRef = useRef(false);
+
+  const notesInitEnabled = isSetupCompleted(configDraft);
 
   const currentPresentation = useMemo(
     () => activePresentations.find((p) => isSamePresentationMemo(p, currentPath)) ?? null,
@@ -119,7 +125,9 @@ function App() {
     clearSelection,
     deleteSelected,
     openManager,
-  } = useNotesData();
+  } = useNotesData(notesInitEnabled);
+
+  const showFirstRunSetup = configDraft != null && needsInitialSetup(configDraft);
 
   const { hoverPreview, openHoverPreview, moveHoverPreview, closeHoverPreview } = useHoverPreview();
   const saveTimerRef = useRef<number | null>(null);
@@ -194,8 +202,11 @@ function App() {
 
   const loadConfig = async () => {
     const cfg = await invoke<AppConfig>("get_config");
+    const setupPending = needsInitialSetup(cfg);
     const merged = {
       ...cfg,
+      notesDir: cfg.notesDir?.trim() || DEFAULT_NOTES_DIR,
+      setupCompleted: setupPending ? false : cfg.setupCompleted,
       templateTags: ensureLockedInboxInTemplateTags(cfg.templateTags ?? []),
       themeMode: cfg.themeMode ?? (cfg.darkMode ? "dark" : "light"),
       themePreset: cfg.themePreset ?? "default",
@@ -233,6 +244,12 @@ function App() {
     });
     void refreshActivePresentations().catch((err) => console.error(err));
   }, []);
+
+  useEffect(() => {
+    if (configDraft && needsInitialSetup(configDraft)) {
+      setFirstRunNotesDir(configDraft.notesDir || DEFAULT_NOTES_DIR);
+    }
+  }, [configDraft]);
 
   useEffect(() => {
     if (!configDraft) return;
@@ -300,7 +317,7 @@ function App() {
       await loadNotes();
     } catch (err) {
       console.error(err);
-      setStatus(messages.status.saveFailed);
+      setStatus(formatAppError(err));
     }
   };
 
@@ -355,7 +372,7 @@ function App() {
         })
         .catch((err) => {
           console.error(err);
-          setStatus(messages.status.saveFailed);
+          setStatus(formatAppError(err));
         });
     }, 500);
 
@@ -403,8 +420,7 @@ function App() {
       setStatus(messages.status.loaded);
     } catch (err) {
       console.error(err);
-      const msg = err instanceof Error ? err.message : String(err);
-      setStatus(messages.status.openNoteFailed(msg));
+      setStatus(formatAppError(err));
       await loadNotes();
     }
   };
@@ -457,6 +473,29 @@ function App() {
     }
   };
 
+  const handleCompleteInitialSetup = async () => {
+    if (!configDraft) return;
+    setIsSavingConfig(true);
+    try {
+      const payload = {
+        ...configDraft,
+        notesDir: firstRunNotesDir.trim(),
+        setupCompleted: true,
+        templateTags: ensureLockedInboxInTemplateTags(configDraft.templateTags),
+      };
+      await invoke("save_config", { config: payload });
+      applyTheme(payload.themeMode);
+      applyThemePreset(payload.themePreset);
+      setConfigDraft(payload);
+      setSavedSettingsSnapshot(JSON.stringify(payload));
+      setStatus(messages.firstRun.completed);
+    } catch (err) {
+      setStatus(formatAppError(err));
+    } finally {
+      setIsSavingConfig(false);
+    }
+  };
+
   const saveSettings = async () => {
     if (!configDraft) return;
     setIsSavingConfig(true);
@@ -474,7 +513,7 @@ function App() {
       setStatus(messages.status.settingsSaved);
     } catch (err) {
       console.error(err);
-      setStatus(messages.status.settingsSaveFailed);
+      setStatus(formatAppError(err));
     } finally {
       setIsSavingConfig(false);
     }
@@ -626,8 +665,7 @@ function App() {
     setContextMenu(null);
     void openNoteInNewWindow(note.path).catch((err) => {
       console.error(err);
-      const msg = err instanceof Error ? err.message : String(err);
-      setStatus(`別ウィンドウを開けませんでした: ${msg}`);
+      setStatus(formatAppError(err));
     });
   };
 
@@ -635,8 +673,7 @@ function App() {
     if (!currentPath) return;
     void openNoteInNewWindow(currentPath).catch((err) => {
       console.error(err);
-      const msg = err instanceof Error ? err.message : String(err);
-      setStatus(`別ウィンドウを開けませんでした: ${msg}`);
+      setStatus(formatAppError(err));
     });
   };
 
@@ -720,8 +757,7 @@ function App() {
     ) {
       void openViewerTab().catch((err) => {
         console.error(err);
-        const msg = err instanceof Error ? err.message : String(err);
-        setStatus(messages.presentation.startFailed(msg));
+        setStatus(formatAppError(err));
       });
       return;
     }
@@ -749,8 +785,7 @@ function App() {
       setStatus(messages.presentation.started);
     } catch (err) {
       console.error(err);
-      const msg = err instanceof Error ? err.message : String(err);
-      setStatus(messages.presentation.startFailed(msg));
+      setStatus(formatAppError(err));
     }
   };
 
@@ -761,8 +796,7 @@ function App() {
       setStatus(messages.presentation.updated);
     } catch (err) {
       console.error(err);
-      const msg = err instanceof Error ? err.message : String(err);
-      setStatus(messages.presentation.updateFailed(msg));
+      setStatus(formatAppError(err));
     }
   };
 
@@ -789,8 +823,7 @@ function App() {
       setStatus(messages.presentation.ended);
     } catch (err) {
       console.error(err);
-      const msg = err instanceof Error ? err.message : String(err);
-      setStatus(messages.presentation.endFailed(msg));
+      setStatus(formatAppError(err));
     }
   };
 
@@ -812,8 +845,7 @@ function App() {
       );
     } catch (err) {
       console.error(err);
-      const msg = err instanceof Error ? err.message : String(err);
-      setStatus(messages.presentation.realtimeFailed(msg));
+      setStatus(formatAppError(err));
     }
   };
 
@@ -827,8 +859,7 @@ function App() {
       }
     } catch (err) {
       console.error(err);
-      const msg = err instanceof Error ? err.message : String(err);
-      setStatus(messages.presentation.startFailed(msg));
+      setStatus(formatAppError(err));
     }
   };
 
@@ -1006,6 +1037,7 @@ function App() {
             }}
             onSave={() => void saveSettings()}
             onClose={closeSettings}
+            onStatus={setStatus}
             onReplaceTagGlobally={(from, to) => replaceTagGlobally(from, to)}
             onAddOrphanToTemplate={addOrphanToTemplate}
             onRemoveTagFromAllMemos={(tag) => removeTagFromAllMemos(tag)}
@@ -1089,6 +1121,15 @@ function App() {
           onChangeRealtime={setPresentationStartRealtime}
           onConfirm={() => void handleConfirmPresentationStart()}
           onCancel={() => setPresentationStartOpen(false)}
+        />
+      )}
+
+      {showFirstRunSetup && (
+        <FirstRunSetupDialog
+          notesDir={firstRunNotesDir}
+          busy={isSavingConfig}
+          onChangeNotesDir={setFirstRunNotesDir}
+          onConfirm={() => void handleCompleteInitialSetup()}
         />
       )}
     </div>

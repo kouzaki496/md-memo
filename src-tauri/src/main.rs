@@ -1,6 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod app_error;
 mod config;
 mod edit_lock;
 mod notes;
@@ -13,6 +14,7 @@ use tauri::{Manager, RunEvent, WindowEvent};
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .on_window_event(|window, event| {
             if let WindowEvent::Destroyed = event {
                 edit_lock::release_if_holder(window.app_handle(), window.label());
@@ -24,11 +26,13 @@ fn main() {
             if let Err(e) = config::prune_stale_pinned_paths(handle) {
                 eprintln!("prune_stale_pinned_paths: {e}");
             }
-            if let Err(e) = notes::ensure_editor_shortcuts_note(handle) {
-                eprintln!("ensure_editor_shortcuts_note: {e}");
-            }
-            if let Err(e) = notes::ensure_markdown_reference_note(handle.clone()) {
-                eprintln!("ensure_markdown_reference_note: {e}");
+            if config::is_setup_completed(&config::load_config(handle)) {
+                if let Err(e) = notes::ensure_editor_shortcuts_note(handle) {
+                    eprintln!("ensure_editor_shortcuts_note: {e}");
+                }
+                if let Err(e) = notes::ensure_markdown_reference_note(handle.clone()) {
+                    eprintln!("ensure_markdown_reference_note: {e}");
+                }
             }
             Ok(())
         })
@@ -49,6 +53,8 @@ fn main() {
             edit_lock::acquire_edit_lock,
             edit_lock::release_edit_lock,
             config::get_config,
+            config::resolve_notes_dir,
+            config::open_notes_dir,
             config::save_config,
             presentation::start_presentation,
             presentation::set_presentation_display,
