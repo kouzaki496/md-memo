@@ -2,7 +2,7 @@
 
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{header, StatusCode},
     response::{
         sse::{Event, KeepAlive, Sse},
         Html, IntoResponse, Json,
@@ -25,6 +25,7 @@ use tauri_plugin_opener::OpenerExt;
 const DEFAULT_PORT: u16 = 17340;
 const MAX_PORT_ATTEMPTS: u16 = 20;
 const UNSAVED_KEY: &str = "__unsaved__";
+static VIEWER_FAVICON_PNG: &[u8] = include_bytes!("../icons/32x32.png");
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,6 +38,12 @@ pub struct PresentationSnapshot {
     pub realtime: bool,
     pub theme_mode: String,
     pub theme_preset: String,
+}
+
+#[derive(Clone)]
+enum ViewerEvent {
+    Snapshot(PresentationSnapshot),
+    Scroll(f64),
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -91,7 +98,8 @@ struct PresentationInner {
     theme_mode: RwLock<String>,
     theme_preset: RwLock<String>,
     app_shutdown: RwLock<bool>,
-    viewer_tx: broadcast::Sender<PresentationSnapshot>,
+    display_scroll_ratio: RwLock<f64>,
+    viewer_tx: broadcast::Sender<ViewerEvent>,
 }
 
 #[derive(Clone)]
@@ -111,6 +119,7 @@ fn presentation() -> &'static AppPresentation {
             theme_mode: RwLock::new("system".to_string()),
             theme_preset: RwLock::new("default".to_string()),
             app_shutdown: RwLock::new(false),
+            display_scroll_ratio: RwLock::new(0.0),
             viewer_tx,
         }))
     })
@@ -217,7 +226,13 @@ pub async fn shutdown_on_app_exit() {
 
 async fn emit_viewer_snapshot(state: &AppPresentation) {
     let snapshot = viewer_snapshot(state).await;
-    let _ = state.0.viewer_tx.send(snapshot);
+    let _ = state.0.viewer_tx.send(ViewerEvent::Snapshot(snapshot));
+}
+
+async fn emit_viewer_scroll(state: &AppPresentation, ratio: f64) {
+    let ratio = ratio.clamp(0.0, 1.0);
+    *state.0.display_scroll_ratio.write().await = ratio;
+    let _ = state.0.viewer_tx.send(ViewerEvent::Scroll(ratio));
 }
 
 async fn emit_viewer_if_displayed(state: &AppPresentation, memo_key: &str) {
@@ -229,7 +244,9 @@ async fn emit_viewer_if_displayed(state: &AppPresentation, memo_key: &str) {
 
 async fn set_display_key(state: &AppPresentation, key: String) {
     *state.0.display_key.write().await = Some(key);
+    *state.0.display_scroll_ratio.write().await = 0.0;
     emit_viewer_snapshot(state).await;
+    emit_viewer_scroll(state, 0.0).await;
 }
 
 async fn ensure_server_running(state: AppPresentation) -> Result<(), String> {
@@ -245,6 +262,7 @@ async fn ensure_server_running(state: AppPresentation) -> Result<(), String> {
     let router_state = state.clone();
     let app = Router::new()
         .route("/view/:token", get(viewer_page_handler))
+        .route("/view/:token/favicon.png", get(viewer_favicon_handler))
         .route("/view/:token/snapshot", get(viewer_snapshot_handler))
         .route("/view/:token/events", get(viewer_events_handler))
         .with_state(router_state);
@@ -291,6 +309,21 @@ async fn viewer_page_handler(
     (StatusCode::OK, Html(viewer_html(&token))).into_response()
 }
 
+async fn viewer_favicon_handler(
+    State(state): State<AppPresentation>,
+    Path(token): Path<String>,
+) -> impl IntoResponse {
+    if !viewer_token_valid(&state, &token).await {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "image/png")],
+        VIEWER_FAVICON_PNG,
+    )
+        .into_response()
+}
+
 async fn viewer_snapshot_handler(
     State(state): State<AppPresentation>,
     Path(token): Path<String>,
@@ -325,8 +358,12 @@ async fn viewer_events_handler(
     let update_stream = stream::unfold(rx, |mut rx| async move {
         loop {
             match rx.recv().await {
-                Ok(snapshot) => {
+                Ok(ViewerEvent::Snapshot(snapshot)) => {
                     let event = Event::default().json_data(snapshot).ok()?;
+                    return Some((Ok::<Event, std::convert::Infallible>(event), rx));
+                }
+                Ok(ViewerEvent::Scroll(ratio)) => {
+                    let event = Event::default().event("scroll").data(ratio.to_string());
                     return Some((Ok::<Event, std::convert::Infallible>(event), rx));
                 }
                 Err(broadcast::error::RecvError::Lagged(_)) => continue,
@@ -397,6 +434,7 @@ fn viewer_html(token: &str) -> String {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/png" href="/view/{token}/favicon.png">
   <title>md-memo 提示</title>
   <style>
     {theme_css}
@@ -434,8 +472,9 @@ fn viewer_html(token: &str) -> String {
   <script>
     const TOKEN = {token_json};
     let hdr = document.getElementById("hdr");
-    const main = document.getElementById("main");
+    let main = document.getElementById("main");
     let lastSnapshot = null;
+    let lastDisplayedKey = null;
     let systemThemeMedia = null;
     let eventSource = null;
 
@@ -444,6 +483,12 @@ fn viewer_html(token: &str) -> String {
         eventSource.close();
         eventSource = null;
       }}
+    }}
+
+    function applyScrollRatio(ratio) {{
+      const max = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+      const top = Math.max(0, Math.min(max, ratio * max));
+      window.scrollTo({{ top, behavior: "instant" in window ? "instant" : "auto" }});
     }}
 
     function resolveIsDark(mode) {{
@@ -475,27 +520,39 @@ fn viewer_html(token: &str) -> String {
     }}
 
     function applySnapshot(s) {{
+      const prev = lastSnapshot;
       lastSnapshot = s;
       applyTheme(s);
       if (s.appShutdown) {{
+        lastDisplayedKey = null;
         hdr.textContent = "提示を停止しました";
         main.innerHTML = '<p class="ended">md-memo を終了したため、提示を終了しました。</p>';
         closeEventSource();
         return;
       }}
       if (!s.fileName && !s.active && !s.ended) {{
+        lastDisplayedKey = null;
         hdr.textContent = "md-memo 提示";
         main.innerHTML = '<p class="idle">アプリで提示するメモを選ぶと、ここに表示されます。</p>';
         return;
       }}
       if (s.ended || !s.active) {{
+        lastDisplayedKey = null;
         hdr.textContent = "提示は終了しました";
         main.innerHTML = '<p class="ended">このメモの提示は終了しています。</p>';
         return;
       }}
+      const displayKey = s.fileName;
+      const displayChanged = lastDisplayedKey !== displayKey;
+      const bodyChanged = !prev || prev.bodyHtml !== s.bodyHtml;
       hdr.textContent = "提示中: " + s.fileName;
-      main.innerHTML = s.bodyHtml || "<p>（空）</p>";
-      window.scrollTo({{ top: 0, behavior: "instant" in window ? "instant" : "auto" }});
+      if (bodyChanged || displayChanged) {{
+        main.innerHTML = s.bodyHtml || "<p>（空）</p>";
+      }}
+      if (displayChanged) {{
+        lastDisplayedKey = displayKey;
+        requestAnimationFrame(() => applyScrollRatio(0));
+      }}
     }}
 
     fetch("/view/" + TOKEN + "/snapshot")
@@ -507,6 +564,12 @@ fn viewer_html(token: &str) -> String {
       }});
 
     eventSource = new EventSource("/view/" + TOKEN + "/events");
+    eventSource.addEventListener("scroll", (ev) => {{
+      const ratio = parseFloat(ev.data);
+      if (!Number.isNaN(ratio)) {{
+        requestAnimationFrame(() => applyScrollRatio(ratio));
+      }}
+    }});
     eventSource.onmessage = (ev) => {{
       try {{
         applySnapshot(JSON.parse(ev.data));
@@ -719,6 +782,33 @@ fn validate_theme_preset(preset: &str) -> Result<(), String> {
         "default" | "sepia" | "high-contrast" => Ok(()),
         _ => Err(format!("不正な themePreset: {preset}")),
     }
+}
+
+#[tauri::command]
+pub async fn set_presentation_scroll(
+    bound_path: Option<String>,
+    scroll_ratio: f64,
+) -> Result<(), String> {
+    let state = presentation();
+    let key = memo_key(&bound_path);
+
+    let display = state.0.display_key.read().await;
+    if display.as_deref() != Some(key.as_str()) {
+        return Ok(());
+    }
+    drop(display);
+
+    let sessions = state.0.sessions.read().await;
+    let Some(session) = sessions.get(&key) else {
+        return Ok(());
+    };
+    if !session.active {
+        return Ok(());
+    }
+    drop(sessions);
+
+    emit_viewer_scroll(state, scroll_ratio).await;
+    Ok(())
 }
 
 #[tauri::command]

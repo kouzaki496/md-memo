@@ -50,6 +50,13 @@ export async function pushPresentationUpdate(
   await invoke("push_presentation_update", { boundPath, body });
 }
 
+export async function setPresentationScroll(
+  boundPath: string | null,
+  scrollRatio: number
+): Promise<void> {
+  await invoke("set_presentation_scroll", { boundPath, scrollRatio });
+}
+
 export async function setPresentationRealtime(
   boundPath: string | null,
   realtime: boolean

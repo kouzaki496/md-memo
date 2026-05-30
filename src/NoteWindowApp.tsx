@@ -28,8 +28,7 @@ export function NoteWindowApp({ notePath }: NoteWindowAppProps) {
   const [input, setInput] = useState("");
   const [isEditMode, setIsEditMode] = useState(false);
   const [previewWidth, setPreviewWidth] = useState(420);
-  const [editorScale, setEditorScale] = useState(1);
-  const [previewScale, setPreviewScale] = useState(1);
+  const [contentScale, setContentScale] = useState(1);
   const [templateTags, setTemplateTags] = useState<string[]>([]);
   const [status, setStatus] = useState<string>(messages.status.ready);
   const saveTimerRef = useRef<number | null>(null);
@@ -225,22 +224,17 @@ export function NoteWindowApp({ notePath }: NoteWindowAppProps) {
         currentFileName={currentFileName}
         input={input}
         previewWidth={previewWidth}
-        editorScale={editorScale}
-        previewScale={previewScale}
+        contentScale={contentScale}
         templateTags={templateTags}
         onEnterEditMode={enterEditMode}
         onEnterPreviewMode={enterPreviewMode}
         onChangeInput={setInput}
         onToggleTemplateTag={toggleTemplateTag}
         onStartPreviewResize={startPreviewResize}
-        onAdjustEditorScale={(delta) =>
-          setEditorScale((prev) => clamp(Number((prev + delta).toFixed(2)), 0.8, 1.6))
+        onAdjustContentScale={(delta) =>
+          setContentScale((prev) => clamp(Number((prev + delta).toFixed(2)), 0.8, 1.6))
         }
-        onAdjustPreviewScale={(delta) =>
-          setPreviewScale((prev) => clamp(Number((prev + delta).toFixed(2)), 0.8, 1.6))
-        }
-        onResetEditorScale={() => setEditorScale(1)}
-        onResetPreviewScale={() => setPreviewScale(1)}
+        onResetContentScale={() => setContentScale(1)}
         onDeleteCurrentNote={() => void deleteCurrentNote()}
         editorRef={editorRef}
       />

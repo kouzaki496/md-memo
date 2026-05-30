@@ -1,5 +1,4 @@
 import {
-  Fragment,
   type KeyboardEvent,
   type MouseEvent,
   type RefObject,
@@ -37,7 +36,6 @@ import { editorShortcutConfig, matchesShortcut } from "@/config/editorShortcuts"
 import {
   buildEditorTagChips,
   getMarkdownBody,
-  getMarkdownBodyStartOffset,
   parseNoteContent,
 } from "@/lib/noteTags";
 import { isBuiltinReservedTagName } from "@/lib/reservedTags";
@@ -119,21 +117,20 @@ type ReadingEditorPaneProps = {
   currentFileName: string;
   input: string;
   previewWidth: number;
-  editorScale: number;
-  previewScale: number;
+  contentScale: number;
   templateTags: string[];
   onEnterEditMode: () => void;
   onEnterPreviewMode: () => void;
   onChangeInput: (v: string) => void;
   onToggleTemplateTag: (tag: string) => void;
   onStartPreviewResize: (clientX: number) => void;
-  onAdjustEditorScale: (delta: number) => void;
-  onAdjustPreviewScale: (delta: number) => void;
-  onResetEditorScale: () => void;
-  onResetPreviewScale: () => void;
+  onAdjustContentScale: (delta: number) => void;
+  onResetContentScale: () => void;
   onDeleteCurrentNote: () => void;
   onOpenInNewWindow?: () => void;
   onPresentInBrowser?: () => void;
+  /** 提示中にプレビューのスクロール比率を viewer へ送る */
+  onPresentationPreviewScroll?: (ratio: number) => void;
   editorRef: RefObject<HTMLTextAreaElement | null>;
 };
 
@@ -287,31 +284,13 @@ function splitPreviewSegments(markdown: string): PreviewSegment[] {
   return segments;
 }
 
-function computePreviewBodyHighlight(
-  raw: string,
-  sel: { start: number; end: number } | null,
-  editMode: boolean
-): { start: number; end: number } | null {
-  if (!editMode || !sel) return null;
-  const lo = sel.start;
-  const hi = sel.end;
-  if (hi <= lo) return null;
-  const bs = getMarkdownBodyStartOffset(raw);
-  if (hi <= bs || lo >= raw.length) return null;
-  const body = getMarkdownBody(raw);
-  let b0 = lo - bs;
-  let b1 = hi - bs;
-  if (b0 < 0) b0 = 0;
-  if (b1 > body.length) b1 = body.length;
-  if (b0 >= b1) return null;
-  const lineStart = body.lastIndexOf("\n", Math.max(0, b0 - 1)) + 1;
-  const nl = body.indexOf("\n", Math.max(0, b1 - 1));
-  const lineEndExclusive = nl === -1 ? body.length : nl + 1;
-  return { start: lineStart, end: lineEndExclusive };
-}
-
 function maxScrollTopFor(el: HTMLElement): number {
   return Math.max(0, el.scrollHeight - el.clientHeight);
+}
+
+function scrollRatioFor(el: HTMLElement): number {
+  const max = maxScrollTopFor(el);
+  return max <= 0 ? 0 : el.scrollTop / max;
 }
 
 /** 編集とプレビューでスクロール可能高さが違う前提で、スクロール位置を比率で写す */
@@ -427,21 +406,19 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
     currentFileName,
     input,
     previewWidth,
-    editorScale,
-    previewScale,
+    contentScale,
     templateTags,
     onEnterEditMode,
     onEnterPreviewMode,
     onChangeInput,
     onToggleTemplateTag,
     onStartPreviewResize,
-    onAdjustEditorScale,
-    onAdjustPreviewScale,
-    onResetEditorScale,
-    onResetPreviewScale,
+    onAdjustContentScale,
+    onResetContentScale,
     onDeleteCurrentNote,
     onOpenInNewWindow,
     onPresentInBrowser,
+    onPresentationPreviewScroll,
     editorRef,
   } = props;
 
@@ -460,9 +437,10 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
   ) : null;
   const editorGutterInnerRef = useRef<HTMLDivElement>(null);
   const splitPreviewScrollHostRef = useRef<HTMLDivElement>(null);
+  const previewOnlyScrollHostRef = useRef<HTMLDivElement>(null);
   const scrollSyncLockRef = useRef<"editor" | "preview" | null>(null);
-  const editorFontSizeRem = 1.125 * editorScale;
-  const editorLineHeightRem = 1.8 * editorScale;
+  const editorFontSizeRem = 1.125 * contentScale;
+  const editorLineHeightRem = 1.8 * contentScale;
   const previewFmTags = useMemo(() => parseNoteContent(input).tags, [input]);
   const editorTagChips = useMemo(
     () => buildEditorTagChips(templateTags, previewFmTags),
@@ -474,39 +452,7 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
   }, [input]);
 
   const [tagsBarExpanded, setTagsBarExpanded] = useState(readTagsBarExpanded);
-  const [editorSelection, setEditorSelection] = useState<{ start: number; end: number } | null>(null);
   const shortcutUndoRef = useRef<ShortcutUndoEntry[]>([]);
-
-  const syncEditorSelection = useCallback(() => {
-    const ta = editorRef.current;
-    if (!ta) return;
-    const s = ta.selectionStart;
-    const e = ta.selectionEnd;
-    if (s === e) {
-      setEditorSelection((prev) => (prev == null ? prev : null));
-      return;
-    }
-    const lo = Math.min(s, e);
-    const hi = Math.max(s, e);
-    setEditorSelection((prev) => {
-      if (prev && prev.start === lo && prev.end === hi) return prev;
-      return { start: lo, end: hi };
-    });
-  }, [editorRef]);
-
-  useLayoutEffect(() => {
-    if (!isEditMode) setEditorSelection(null);
-  }, [isEditMode]);
-
-  useLayoutEffect(() => {
-    if (!isEditMode) return;
-    syncEditorSelection();
-  }, [input, isEditMode, syncEditorSelection]);
-
-  const previewBodyHighlight = useMemo(
-    () => computePreviewBodyHighlight(input, editorSelection, isEditMode),
-    [input, editorSelection, isEditMode]
-  );
 
   const toggleTagsBar = () => {
     setTagsBarExpanded((prev) => {
@@ -531,6 +477,49 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
     return host?.querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]') ?? null;
   }, []);
 
+  const getPreviewScrollViewport = useCallback((): HTMLDivElement | null => {
+    const splitHost = splitPreviewScrollHostRef.current;
+    const previewHost = previewOnlyScrollHostRef.current;
+    const host = splitHost ?? previewHost;
+    return host?.querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]') ?? null;
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!onPresentationPreviewScroll) return;
+
+    let cancelled = false;
+    let detach: (() => void) | undefined;
+    let rafId = 0;
+
+    const attach = () => {
+      if (detach || cancelled) return;
+      const vp = getPreviewScrollViewport();
+      if (!vp) return;
+
+      const report = () => {
+        onPresentationPreviewScroll(scrollRatioFor(vp));
+      };
+
+      const onScroll = () => report();
+      vp.addEventListener("scroll", onScroll, { passive: true });
+      report();
+      detach = () => vp.removeEventListener("scroll", onScroll);
+    };
+
+    attach();
+    if (!detach) {
+      rafId = requestAnimationFrame(() => {
+        if (!cancelled) attach();
+      });
+    }
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(rafId);
+      detach?.();
+    };
+  }, [onPresentationPreviewScroll, isEditMode, previewWidth, contentScale, getPreviewScrollViewport]);
+
   const handleEditorScroll = (e: UIEvent<HTMLTextAreaElement>) => {
     const ta = e.currentTarget;
     syncEditorGutterScroll(ta.scrollTop);
@@ -547,7 +536,7 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
   useLayoutEffect(() => {
     const ta = editorRef.current;
     if (ta) syncEditorGutterScroll(ta.scrollTop);
-  }, [input, editorScale]);
+  }, [input, contentScale]);
 
   useLayoutEffect(() => {
     if (!isEditMode) return;
@@ -583,7 +572,7 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
       cancelAnimationFrame(rafId);
       detach?.();
     };
-  }, [isEditMode, getSplitPreviewViewport, previewWidth, previewScale, editorScale]);
+  }, [isEditMode, getSplitPreviewViewport, previewWidth, contentScale]);
 
   const handleScaleShortcut = (
     e: KeyboardEvent<HTMLElement>,
@@ -784,7 +773,6 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
     e.preventDefault();
     textarea.focus();
     textarea.setSelectionRange(nextStart, nextStart + needle.length);
-    syncEditorSelection();
   };
 
   const handleListShortcut = (
@@ -874,7 +862,7 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
   };
 
   const handleEditorKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    handleScaleShortcut(e, onAdjustEditorScale, onResetEditorScale);
+    handleScaleShortcut(e, onAdjustContentScale, onResetContentScale);
     if (e.defaultPrevented) return;
 
     if (
@@ -1071,77 +1059,29 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
     }
   };
 
-  const renderMarkdownSegmentWithHighlight = (
+  const renderMarkdownSegment = (
     segment: Extract<PreviewSegment, { type: "markdown" }>,
     index: number
-  ) => {
-    const { content, bodyStart, bodyEnd } = segment;
-    const hl = previewBodyHighlight;
-    if (!hl || hl.end <= bodyStart || hl.start >= bodyEnd) {
-      return (
-        <ReactMarkdown
-          key={`md-${index}`}
-          remarkPlugins={remarkPreviewPlugins}
-          components={markdownPreviewComponents}
-        >
-          {content}
-        </ReactMarkdown>
-      );
-    }
-    const a = Math.max(0, hl.start - bodyStart);
-    const b = Math.min(content.length, hl.end - bodyStart);
-    if (a >= b) {
-      return (
-        <ReactMarkdown
-          key={`md-${index}`}
-          remarkPlugins={remarkPreviewPlugins}
-          components={markdownPreviewComponents}
-        >
-          {content}
-        </ReactMarkdown>
-      );
-    }
-    const before = content.slice(0, a);
-    const mid = content.slice(a, b);
-    const after = content.slice(b);
-    return (
-      <Fragment key={`md-${index}`}>
-        {before ? (
-          <ReactMarkdown remarkPlugins={remarkPreviewPlugins} components={markdownPreviewComponents}>
-            {before}
-          </ReactMarkdown>
-        ) : null}
-        {mid ? (
-          <div className="preview-body-selection">
-            <ReactMarkdown remarkPlugins={remarkPreviewPlugins} components={markdownPreviewComponents}>
-              {mid}
-            </ReactMarkdown>
-          </div>
-        ) : null}
-        {after ? (
-          <ReactMarkdown remarkPlugins={remarkPreviewPlugins} components={markdownPreviewComponents}>
-            {after}
-          </ReactMarkdown>
-        ) : null}
-      </Fragment>
-    );
-  };
+  ) => (
+    <ReactMarkdown
+      key={`md-${index}`}
+      remarkPlugins={remarkPreviewPlugins}
+      components={markdownPreviewComponents}
+    >
+      {segment.content}
+    </ReactMarkdown>
+  );
 
   const renderPreviewLines = () => {
     const segments = splitPreviewSegments(previewMarkdown || messages.manager.emptyPreview);
-    const hl = previewBodyHighlight;
     return segments.map((segment, index) => {
       if (segment.type === "markdown") {
-        return renderMarkdownSegmentWithHighlight(segment, index);
+        return renderMarkdownSegment(segment, index);
       }
 
       const body = segment.content.trim();
-      const calloutHighlighted = hl != null && hl.end > segment.bodyStart && hl.start < segment.bodyEnd;
       return (
-        <div
-          key={`callout-${index}`}
-          className={cn(`md-callout md-callout--${segment.kind}`, calloutHighlighted && "preview-callout-selection")}
-        >
+        <div key={`callout-${index}`} className={cn(`md-callout md-callout--${segment.kind}`)}>
           <span className="md-callout__icon" aria-hidden="true">
             {segment.kind === "warn" ? (
               <AlertTriangle size={18} />
@@ -1155,7 +1095,10 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
           </span>
           {body ? (
             <div className="md-callout__body">
-              <ReactMarkdown remarkPlugins={remarkPreviewPlugins} components={markdownPreviewComponents}>
+              <ReactMarkdown
+                remarkPlugins={remarkPreviewPlugins}
+                components={markdownPreviewComponents}
+              >
                 {body}
               </ReactMarkdown>
             </div>
@@ -1212,7 +1155,7 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
                 className={toolbarBtn}
                 title={messages.editor.zoomOut}
                 aria-label={messages.editor.zoomOut}
-                onClick={() => onAdjustEditorScale(-0.1)}
+                onClick={() => onAdjustContentScale(-0.1)}
               >
                 <Minus className="h-4 w-4" />
               </Button>
@@ -1223,7 +1166,7 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
                 className={toolbarBtn}
                 title={messages.editor.zoomIn}
                 aria-label={messages.editor.zoomIn}
-                onClick={() => onAdjustEditorScale(0.1)}
+                onClick={() => onAdjustContentScale(0.1)}
               >
                 <Plus className="h-4 w-4" />
               </Button>
@@ -1269,16 +1212,10 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
               onChange={(e) => {
                 shortcutUndoRef.current = [];
                 onChangeInput(e.target.value);
-                requestAnimationFrame(() => {
-                  syncEditorSelection();
-                });
               }}
-              onSelect={syncEditorSelection}
-              onKeyUp={syncEditorSelection}
-              onMouseUp={syncEditorSelection}
               onKeyDown={handleEditorKeyDown}
               onScroll={handleEditorScroll}
-              onWheel={(e) => handleScaleWheel(e, onAdjustEditorScale)}
+              onWheel={(e) => handleScaleWheel(e, onAdjustContentScale)}
               style={{
                 fontSize: `${editorFontSizeRem}rem`,
                 lineHeight: `${editorLineHeightRem}rem`,
@@ -1364,28 +1301,6 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
               </span>
             </span>
             <div className="flex items-center gap-1">
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                className={toolbarBtn}
-                title={messages.editor.zoomOut}
-                aria-label={messages.editor.zoomOut}
-                onClick={() => onAdjustPreviewScale(-0.1)}
-              >
-                <Minus className="h-4 w-4" />
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                className={toolbarBtn}
-                title={messages.editor.zoomIn}
-                aria-label={messages.editor.zoomIn}
-                onClick={() => onAdjustPreviewScale(0.1)}
-              >
-                <Plus className="h-4 w-4" />
-              </Button>
               {onOpenInNewWindow && (
                 <Button
                   type="button"
@@ -1438,10 +1353,10 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
               {renderPreviewTagsBar()}
               <div
                 className="markdown-preview prose prose-slate dark:prose-invert prose-headings:font-heading max-w-none"
-                style={{ fontSize: `${previewScale}rem` }}
+                style={{ fontSize: `${contentScale}rem` }}
                 tabIndex={0}
-                onKeyDown={(e) => handleScaleShortcut(e, onAdjustPreviewScale, onResetPreviewScale)}
-                onWheel={(e) => handleScaleWheel(e, onAdjustPreviewScale)}
+                onKeyDown={(e) => handleScaleShortcut(e, onAdjustContentScale, onResetContentScale)}
+                onWheel={(e) => handleScaleWheel(e, onAdjustContentScale)}
               >
                 {renderPreviewLines()}
               </div>
@@ -1472,7 +1387,7 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
             className={toolbarBtn}
             title={messages.editor.zoomOut}
             aria-label={messages.editor.zoomOut}
-            onClick={() => onAdjustPreviewScale(-0.1)}
+            onClick={() => onAdjustContentScale(-0.1)}
           >
             <Minus className="h-4 w-4" />
           </Button>
@@ -1483,7 +1398,7 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
             className={toolbarBtn}
             title={messages.editor.zoomIn}
             aria-label={messages.editor.zoomIn}
-            onClick={() => onAdjustPreviewScale(0.1)}
+            onClick={() => onAdjustContentScale(0.1)}
           >
             <Plus className="h-4 w-4" />
           </Button>
@@ -1547,18 +1462,20 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
           )}
         </div>
       </div>
-      <ScrollArea className="min-h-0 flex-1 overflow-hidden p-8">
-        {renderPreviewTagsBar()}
-        <div
-          className="markdown-preview prose prose-slate dark:prose-invert prose-headings:font-heading max-w-none"
-          style={{ fontSize: `${previewScale}rem` }}
-          tabIndex={0}
-          onKeyDown={(e) => handleScaleShortcut(e, onAdjustPreviewScale, onResetPreviewScale)}
-          onWheel={(e) => handleScaleWheel(e, onAdjustPreviewScale)}
-        >
-          {renderPreviewLines()}
-        </div>
-      </ScrollArea>
+      <div ref={previewOnlyScrollHostRef} className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <ScrollArea className="min-h-0 flex-1 overflow-hidden p-8">
+          {renderPreviewTagsBar()}
+          <div
+            className="markdown-preview prose prose-slate dark:prose-invert prose-headings:font-heading max-w-none"
+            style={{ fontSize: `${contentScale}rem` }}
+            tabIndex={0}
+            onKeyDown={(e) => handleScaleShortcut(e, onAdjustContentScale, onResetContentScale)}
+            onWheel={(e) => handleScaleWheel(e, onAdjustContentScale)}
+          >
+            {renderPreviewLines()}
+          </div>
+        </ScrollArea>
+      </div>
     </main>
   );
 }

@@ -55,6 +55,7 @@ fn main() {
             presentation::set_presentation_theme,
             presentation::get_presentation_viewer_url,
             presentation::push_presentation_update,
+            presentation::set_presentation_scroll,
             presentation::set_presentation_realtime,
             presentation::end_presentation,
             presentation::get_presentation_status,

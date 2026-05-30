@@ -1,4 +1,4 @@
-import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PanelLeftOpen, Plus } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -37,6 +37,7 @@ import {
   pushPresentationUpdate,
   setPresentationDisplay,
   setPresentationRealtime,
+  setPresentationScroll,
   startPresentation,
   syncPresentationTheme,
 } from "@/lib/presentation";
@@ -63,8 +64,7 @@ function App() {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(288);
   const [previewWidth, setPreviewWidth] = useState(420);
-  const [editorScale, setEditorScale] = useState(1);
-  const [previewScale, setPreviewScale] = useState(1);
+  const [contentScale, setContentScale] = useState(1);
   const [isSettingsMode, setIsSettingsMode] = useState(false);
   const [configDraft, setConfigDraft] = useState<AppConfig | null>(null);
   const [savedSettingsSnapshot, setSavedSettingsSnapshot] = useState<string | null>(null);
@@ -124,6 +124,8 @@ function App() {
   const { hoverPreview, openHoverPreview, moveHoverPreview, closeHoverPreview } = useHoverPreview();
   const saveTimerRef = useRef<number | null>(null);
   const presentationPushTimerRef = useRef<number | null>(null);
+  const presentationScrollTimerRef = useRef<number | null>(null);
+  const lastPresentationScrollRatioRef = useRef<number | null>(null);
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
   const activePresentationsRef = useRef(activePresentations);
   activePresentationsRef.current = activePresentations;
@@ -182,20 +184,12 @@ function App() {
     document.addEventListener("mouseup", onMouseUp);
   };
 
-  const adjustEditorScale = (delta: number) => {
-    setEditorScale((prev) => clamp(Number((prev + delta).toFixed(2)), 0.8, 1.6));
+  const adjustContentScale = (delta: number) => {
+    setContentScale((prev) => clamp(Number((prev + delta).toFixed(2)), 0.8, 1.6));
   };
 
-  const adjustPreviewScale = (delta: number) => {
-    setPreviewScale((prev) => clamp(Number((prev + delta).toFixed(2)), 0.8, 1.6));
-  };
-
-  const resetEditorScale = () => {
-    setEditorScale(1);
-  };
-
-  const resetPreviewScale = () => {
-    setPreviewScale(1);
+  const resetContentScale = () => {
+    setContentScale(1);
   };
 
   const loadConfig = async () => {
@@ -648,6 +642,28 @@ function App() {
 
   const resolveCurrentPresentationBody = () => getMarkdownBody(input);
 
+  const handlePresentationPreviewScroll = useCallback(
+    (ratio: number) => {
+      if (!currentPresentation?.active) return;
+      if (!isSamePresentationMemo(currentPresentation, currentPath)) return;
+
+      const clamped = Math.max(0, Math.min(1, ratio));
+      const prev = lastPresentationScrollRatioRef.current;
+      if (prev != null && Math.abs(prev - clamped) < 0.002) return;
+
+      if (presentationScrollTimerRef.current != null) {
+        window.clearTimeout(presentationScrollTimerRef.current);
+      }
+      presentationScrollTimerRef.current = window.setTimeout(() => {
+        lastPresentationScrollRatioRef.current = clamped;
+        void setPresentationScroll(currentPath, clamped).catch((err) => {
+          console.error(err);
+        });
+      }, 80);
+    },
+    [currentPresentation, currentPath]
+  );
+
   const openViewerTab = async (statusMessage?: string) => {
     const url =
       viewerUrl ?? currentPresentation?.url ?? activePresentations[0]?.url ?? (await getPresentationViewerUrl());
@@ -661,6 +677,10 @@ function App() {
   useEffect(() => {
     if (!currentPresentation?.active) return;
     void setPresentationDisplay(currentPath).catch((err) => console.error(err));
+  }, [currentPath, currentPresentation?.active, currentPresentation?.boundPath]);
+
+  useEffect(() => {
+    lastPresentationScrollRatioRef.current = null;
   }, [currentPath, currentPresentation?.active, currentPresentation?.boundPath]);
 
   useEffect(() => {
@@ -1032,22 +1052,22 @@ function App() {
               currentPath={currentPath}
               currentFileName={currentFileName}
               input={input}
+              contentScale={contentScale}
               previewWidth={previewWidth}
-              editorScale={editorScale}
-              previewScale={previewScale}
               templateTags={templateTags}
               onEnterEditMode={enterEditMode}
               onEnterPreviewMode={enterPreviewMode}
               onChangeInput={setInput}
               onToggleTemplateTag={toggleTemplateTag}
               onStartPreviewResize={startPreviewResize}
-              onAdjustEditorScale={adjustEditorScale}
-              onAdjustPreviewScale={adjustPreviewScale}
-              onResetEditorScale={resetEditorScale}
-              onResetPreviewScale={resetPreviewScale}
+              onAdjustContentScale={adjustContentScale}
+              onResetContentScale={resetContentScale}
               onDeleteCurrentNote={deleteCurrentNote}
               onOpenInNewWindow={currentPath ? handleOpenCurrentInNewWindow : undefined}
               onPresentInBrowser={() => void handleStartPresentation()}
+              onPresentationPreviewScroll={
+                currentPresentation?.active ? handlePresentationPreviewScroll : undefined
+              }
               editorRef={editorRef}
             />
           </div>
