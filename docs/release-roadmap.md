@@ -20,7 +20,7 @@ Scriptax（Tauri 2）を **GitHub Releases + GitHub Actions** で配布するま
 |------|------|
 | 配布チャネル | GitHub Releases（インストーラ / バイナリ添付） |
 | ビルド | GitHub Actions（タグ push で起動） |
-| 初回ターゲット | **Windows のみ**（`.msi` または NSIS `.exe`）で開始可 |
+| ターゲット | **Windows / macOS / Linux**（Release workflow の matrix） |
 | 初回バージョン | `v0.1.0` |
 | 署名 | v0.1.0 は **なし**（SmartScreen / Gatekeeper 警告は許容） |
 | 自動更新 | v0.1.0 では **Tauri Updater 未導入**（手動 DL） |
@@ -31,11 +31,11 @@ Scriptax（Tauri 2）を **GitHub Releases + GitHub Actions** で配布するま
 
 | 項目 | 状態 |
 |------|------|
-| 開発ブランチ | `feature/001`（`main` 未マージ） |
-| CI | `main` / `master` で test + `npm run build` のみ。**`tauri build` なし** |
-| Release workflow | **未作成** |
-| README | Tauri テンプレのまま |
-| LICENSE | **未追加** |
+| 開発ブランチ | `main`（`feature/001` マージ済み） |
+| CI | `main` / `master` で test + `npm run build` |
+| Release workflow | [.github/workflows/release.yml](../.github/workflows/release.yml)（Windows / macOS / Linux、`v*` タグ） |
+| README | 利用者向けに差し替え済み |
+| LICENSE | MIT（ルート [LICENSE](../LICENSE)） |
 | バージョン | `0.1.0`（`package.json` / `tauri.conf.json` / `Cargo.toml` で一致） |
 
 ---
@@ -44,11 +44,11 @@ Scriptax（Tauri 2）を **GitHub Releases + GitHub Actions** で配布するま
 
 ### 必須
 
-- [ ] **`main` にマージ** — 以降のタグ・CI・Release は `main` 基準
-- [ ] **README 差し替え** — 用途・対応 OS・インストール・メモ保存場所・提示機能の制約
-- [ ] **`LICENSE` 追加** — MIT 等（配布に必須）
-- [ ] **ローカルで `npm run tauri build` 成功** — Windows 上でインストーラが `src-tauri/target/release/bundle/` に生成されること
-- [ ] **バージョン更新手順の固定** — 下記 3 ファイルを同じ値に揃える
+- [x] **`main` にマージ** — 以降のタグ・CI・Release は `main` 基準
+- [x] **README 差し替え** — 用途・対応 OS・インストール・メモ保存場所・提示機能の制約
+- [x] **`LICENSE` 追加** — MIT 等（配布に必須）
+- [x] **ローカルで `npm run tauri build` 成功** — Windows 上でインストーラが `src-tauri/target/release/bundle/` に生成されること
+- [x] **バージョン更新手順の固定** — 下記 3 ファイルを同じ値に揃える
 
 | ファイル | キー |
 |---------|------|
@@ -68,7 +68,7 @@ Scriptax（Tauri 2）を **GitHub Releases + GitHub Actions** で配布するま
 - macOS 公証（notarization）
 - Tauri Updater
 - Microsoft Store / Mac App Store / winget / Homebrew
-- 全 OS 同時ビルド（Windows 単体で開始可）
+- 全 OS 同時ビルド（Release workflow で Windows / macOS / Linux）
 
 ---
 
@@ -85,18 +85,18 @@ on:
 
 タグ `v0.1.0` の push → ビルド → GitHub Release 作成 → 成果物アップロード。
 
-### ジョブ（初版）
+### ジョブ（Release workflow）
 
 | ジョブ | runner | 成果物（例） |
 |--------|--------|--------------|
-| `build-windows` | `windows-latest` | `.msi`, `.exe`（NSIS） |
+| Windows | `windows-latest` | `.msi`, `.exe`（NSIS） |
+| macOS (Apple Silicon) | `macos-latest` | `.dmg`（`aarch64-apple-darwin`） |
+| macOS (Intel) | `macos-latest` | `.dmg`（`x86_64-apple-darwin`） |
+| Linux | `ubuntu-22.04` | `.deb`, `.AppImage` |
 
-### ジョブ（拡張時）
+### ジョブ（旧・初版メモ）
 
-| ジョブ | runner | 成果物（例） |
-|--------|--------|--------------|
-| `build-macos` | `macos-latest` | `.dmg`, `.app` |
-| `build-linux` | `ubuntu-latest` | `.deb`, `.AppImage` |
+Windows のみで開始したが、macOS / Linux を matrix に追加済み。
 
 ### ビルド手順（各ジョブ共通イメージ）
 
@@ -148,13 +148,16 @@ on:
 
 ### インストール
 
-1. Assets から Windows 用インストーラを DL
-2. 実行してインストール
+1. Assets から OS に合ったファイルを DL
+   - Windows: `.msi` / `.exe`
+   - macOS: Apple Silicon / Intel 用 `.dmg`
+   - Linux: `.deb` / `.AppImage`
+2. インストール（macOS 未署名時は右クリック → 開く）
 3. 初回起動時にメモ保存フォルダを設定
 
 ### 既知の制約
 
-- 未署名のため Windows SmartScreen の警告が出る場合あり
+- 未署名のため Windows SmartScreen / macOS Gatekeeper の警告が出る場合あり
 - 提示 viewer の Mermaid は CDN（jsDelivr）を利用
 - メモはローカル保存（クラウド同期なし）
 ```
@@ -165,21 +168,21 @@ on:
 
 - [ ] Issues でフィードバック受付
 - [ ] バグ修正 → パッチバージョン（`v0.1.1`）同手順で Release
-- [ ] ダウンロード数・要望を見て macOS / Linux ビルドを追加
+- [ ] ダウンロード数・要望を見て配布形式（winget / Homebrew 等）を検討
 - [ ] 必要ならコード署名・Updater を [release-roadmap.md](./release-roadmap.md) に追記して v0.2 以降で検討
 
 ---
 
 ## 利用者向けに README に書く内容（チェックリスト）
 
-- [ ] Scriptax とは何か（1〜2 文）
-- [ ] 対応 OS（初回は Windows）
-- [ ] Releases からのインストール手順
-- [ ] メモの保存場所（設定 → notesDir、デフォルトはドキュメント配下）
-- [ ] データの扱い（ローカルのみ、外部送信なし）
-- [ ] 提示機能（localhost、Meet 等での画面共有向け）
-- [ ] ショートカット一覧メモ（`editor-shortcuts.md`）への言及
-- [ ] ライセンスへのリンク
+- [x] Scriptax とは何か（1〜2 文）
+- [x] 対応 OS（Windows / macOS / Linux）
+- [x] Releases からのインストール手順
+- [x] メモの保存場所（設定 → notesDir、デフォルトはドキュメント配下）
+- [x] データの扱い（ローカルのみ、外部送信なし）
+- [x] 提示機能（localhost、Meet 等での画面共有向け）
+- [x] ショートカット一覧メモ（`editor-shortcuts.md`）への言及
+- [x] ライセンスへのリンク
 
 ---
 
@@ -202,7 +205,7 @@ on:
 | npm パッケージ | `package.json` |
 | アイコン | `src-tauri/icons/` |
 | CI（テスト） | `.github/workflows/ci.yml` |
-| Release workflow（未作成） | `.github/workflows/release.yml`（予定） |
+| Release workflow | [.github/workflows/release.yml](../.github/workflows/release.yml) |
 | 画面共有・提示仕様 | [dev/screen-share-browser-view.md](../dev/screen-share-browser-view.md) |
 
 ---
@@ -212,4 +215,4 @@ on:
 | 日付 | 内容 |
 |------|------|
 | 2026-05-29 | 初版作成。GitHub Releases + Actions 方針、フェーズ 0〜3 を整理 |
-| 2026-05-29 | ロードマップ類を `dev/` へ移動。`docs/` は契約 JSON・仕様・本ファイルのみ（[docs/README.md](./README.md)） |
+| 2026-05-29 | Release workflow に macOS（Intel / Apple Silicon）・Linux を追加 |
