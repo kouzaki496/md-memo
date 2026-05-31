@@ -5,7 +5,7 @@
 const v = process.version;
 const m = /^v(\d+)\.(\d+)\.(\d+)/.exec(v);
 if (!m) {
-  console.error(`[md-memo] 想定外の Node バージョン文字列: ${v}`);
+  console.error(`[Scriptax] 想定外の Node バージョン文字列: ${v}`);
   process.exit(1);
 }
 const major = Number(m[1]);
@@ -20,8 +20,8 @@ else ok = major >= 23;
 
 if (!ok) {
   console.error("");
-  console.error(`[md-memo] 現在の Node は ${v} です。Vite 7 には Node 20.19+ または 22.12+ が必要です。`);
-  console.error(`[md-memo] 実行中のバイナリ: ${process.execPath}`);
+  console.error(`[Scriptax] 現在の Node は ${v} です。Vite 7 には Node 20.19+ または 22.12+ が必要です。`);
+  console.error(`[Scriptax] 実行中のバイナリ: ${process.execPath}`);
   console.error("");
   console.error("Git Bash (MINGW64) で次のいずれかを実行し、再度 npm run tauri dev してください:");
   console.error("  nvm install 22 && nvm use 22");

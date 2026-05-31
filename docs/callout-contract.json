@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "description": "::: note / note:: 記法のパースと callout HTML 出力の FE↔Rust 共有契約。色値は shared/md-callout.css、アイコン SVG は shared/callout-icon-*.svg が正。",
+  "constants": {
+    "kinds": ["info", "warn", "alert", "tip"],
+    "defaultKind": "info",
+    "labelsJa": {
+      "info": "情報",
+      "warn": "注意",
+      "alert": "警告",
+      "tip": "ヒント"
+    }
+  },
+  "normalizeKind": [
+    { "id": "info", "raw": "info", "kind": "info" },
+    { "id": "warn-upper", "raw": "WARN", "kind": "warn" },
+    { "id": "alert", "raw": "alert", "kind": "alert" },
+    { "id": "tip", "raw": "tip", "kind": "tip" },
+    { "id": "missing-default", "raw": null, "kind": "info" },
+    { "id": "unknown-default", "raw": "note", "kind": "info" }
+  ],
+  "splitSegments": [
+    {
+      "id": "plain-markdown",
+      "markdown": "hello\nworld",
+      "segments": [{ "type": "markdown", "content": "hello\nworld" }]
+    },
+    {
+      "id": "block-warn",
+      "markdown": "::: note warn\nbe careful\n:::",
+      "segments": [{ "type": "callout", "kind": "warn", "content": "be careful" }]
+    },
+    {
+      "id": "block-default-info",
+      "markdown": "::: note\ninfo body\n:::",
+      "segments": [{ "type": "callout", "kind": "info", "content": "info body" }]
+    },
+    {
+      "id": "single-tip",
+      "markdown": "note::tip Remember this",
+      "segments": [{ "type": "callout", "kind": "tip", "content": "Remember this" }]
+    },
+    {
+      "id": "multi-alert",
+      "markdown": "note::alert\nline1\nline2\n::note",
+      "segments": [{ "type": "callout", "kind": "alert", "content": "line1\nline2" }]
+    },
+    {
+      "id": "unclosed-block",
+      "markdown": "::: note\nno end",
+      "segments": [{ "type": "markdown", "content": "::: note\nno end" }]
+    },
+    {
+      "id": "mixed",
+      "markdown": "intro\n::: note tip\nhint\n:::\noutro",
+      "segments": [
+        { "type": "markdown", "content": "intro" },
+        { "type": "callout", "kind": "tip", "content": "hint" },
+        { "type": "markdown", "content": "outro" }
+      ]
+    }
+  ],
+  "renderBodyHtml": [
+    {
+      "id": "block-warn",
+      "markdown": "::: note warn\nbe careful\n:::",
+      "contains": ["md-callout--warn", "be careful", "md-callout__icon"]
+    },
+    {
+      "id": "single-tip",
+      "markdown": "note::tip Remember",
+      "contains": ["md-callout--tip", "Remember", "md-callout__icon"]
+    },
+    {
+      "id": "block-info-no-kind",
+      "markdown": "::: note\nhello\n:::",
+      "contains": ["md-callout--info", "hello", "md-callout__icon"]
+    }
+  ]
+}

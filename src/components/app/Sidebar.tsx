@@ -1,54 +1,62 @@
-import { type MouseEvent, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Clock, List, PanelLeftClose, Pin, Plus, Search, Settings } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ChevronDown, ChevronRight, Clock, ExternalLink, List, Lock, Monitor, PanelLeftClose, Pin, Plus, Search, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import type { NoteMeta, SearchHit } from "@/types/note";
+import { isLineSearchHit, isMixedSearchMode, isFuzzySearchHit, isTagSearchHit, isTagSearchMode } from "@/types/note";
+import { SearchFuzzyBadge } from "@/components/app/SearchMatchHint";
+import { useSidebarContext } from "@/contexts/SidebarContext";
 import { INBOX_EXCLUSIVE_MESSAGE } from "@/lib/noteTags";
+import { fileNameFromPath } from "@/lib/notePath";
+import { useAppVersion } from "@/hooks/useAppVersion";
+import { messages } from "@/lib/messages";
 import { cn } from "@/lib/utils";
 
-type SidebarProps = {
-  query: string;
-  setQuery: (v: string) => void;
-  pinned: NoteMeta[];
-  recent: NoteMeta[];
-  searchResults: SearchHit[];
-  activeHit: SearchHit | null;
-  currentPath: string | null;
-  status: string;
-  onCreateNew: () => void;
-  onOpenManager: () => void;
-  onOpenSettings: () => void;
-  onOpenNote: (path: string, hit?: SearchHit) => void;
-  onOpenContextMenu: (e: MouseEvent, note: NoteMeta) => void;
-  onOpenHoverPreview: (e: MouseEvent, note: NoteMeta) => void;
-  onMoveHoverPreview: (e: MouseEvent) => void;
-  onCloseHoverPreview: () => void;
-  onCloseSidebar: () => void;
-};
+/** サイドバー検索結果のプレビュー件数。超過分は一覧管理へ誘導する。 */
+const SIDEBAR_SEARCH_PREVIEW_LIMIT = 8;
 
-export function Sidebar(props: SidebarProps) {
+export function Sidebar() {
+  const { search, notes, presentation, actions, interactions, status } = useSidebarContext();
   const {
     query,
     setQuery,
-    pinned,
-    recent,
-    searchResults,
+    results: searchResults,
+    mode: searchMode,
+    error: searchError,
+    pending: searchPending,
     activeHit,
-    currentPath,
-    status,
-    onCreateNew,
-    onOpenManager,
-    onOpenSettings,
-    onOpenNote,
-    onOpenContextMenu,
-    onOpenHoverPreview,
-    onMoveHoverPreview,
-    onCloseHoverPreview,
-    onCloseSidebar,
-  } = props;
+  } = search;
+  const { pinned, recent, currentPath } = notes;
+  const {
+    activePresentations,
+    presentedPaths,
+    openPresentedNote,
+    reopenPresentationTab,
+  } = presentation;
+  const {
+    createNew: onCreateNew,
+    openManager: onOpenManager,
+    openSettings: onOpenSettings,
+    openNote: onOpenNote,
+    closeSidebar: onCloseSidebar,
+  } = actions;
+  const {
+    openContextMenu: onOpenContextMenu,
+    openContextMenuForPath: onOpenContextMenuForPath,
+    openHoverPreview: onOpenHoverPreview,
+    moveHoverPreview: onMoveHoverPreview,
+    closeHoverPreview: onCloseHoverPreview,
+  } = interactions;
   const isSearching = query.trim().length > 0;
+  const isTagSearch = isTagSearchMode(searchMode);
+  const isMixedSearch = isMixedSearchMode(searchMode);
+  const searchResultsTitle = isTagSearch
+    ? messages.sidebar.searchResultsTags
+    : isMixedSearch
+      ? messages.sidebar.searchResultsMixed
+      : messages.sidebar.searchResults;
+  const appVersion = useAppVersion();
   const [isRecentOpen, setIsRecentOpen] = useState(true);
   const prevIsSearchingRef = useRef(false);
 
@@ -58,6 +66,16 @@ export function Sidebar(props: SidebarProps) {
     }
     prevIsSearchingRef.current = isSearching;
   }, [isSearching]);
+
+  const renderPresentingBadge = (path: string) => {
+    if (!presentedPaths.has(path)) return null;
+    return (
+      <Monitor
+        className="h-3 w-3 shrink-0 text-primary"
+        aria-label={messages.sidebar.presenting}
+      />
+    );
+  };
 
   const renderNoteTags = (tags: string[]) => {
     if (tags.length === 0) return null;
@@ -79,11 +97,22 @@ export function Sidebar(props: SidebarProps) {
     <aside className="h-full min-h-0 w-full overflow-hidden border-r bg-muted/35 backdrop-blur supports-[backdrop-filter]:bg-muted/20 flex flex-col">
       <div className="p-4 space-y-4 border-b bg-background/70">
         <div className="flex items-center justify-between">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Memo Desk</div>
+          <div className="flex min-w-0 items-baseline gap-2">
+            <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+              {messages.sidebar.appName}
+            </div>
+            {appVersion && (
+              <span
+                className="text-[10px] tabular-nums text-muted-foreground/75"
+                title={messages.settings.version(appVersion)}
+              >
+                v{appVersion}
+              </span>
+            )}
+          </div>
           <Button
-            variant="outline"
+            variant="toolbar"
             size="icon-sm"
-            className="rounded-md border border-border bg-background shadow-sm hover:bg-muted/80"
             onClick={onCloseSidebar}
             title="サイドバーを閉じる"
             aria-label="サイドバーを閉じる"
@@ -97,29 +126,29 @@ export function Sidebar(props: SidebarProps) {
           className="w-full justify-start gap-2 rounded-md shadow-md ring-1 ring-primary/25 hover:ring-primary/40"
           title="新規メモを作成"
         >
-          <Plus className="w-4 h-4" /> New Memo
+          <Plus className="w-4 h-4" /> {messages.sidebar.newMemo}
         </Button>
         <Button
-          onClick={onOpenManager}
-          variant="outline"
-          className="w-full justify-start gap-2 rounded-md border border-border bg-background shadow-sm hover:bg-muted/80"
+          onClick={() => onOpenManager()}
+          variant="toolbar"
+          className="w-full justify-start gap-2"
           title="メモ一覧の管理・一括操作"
         >
-          <List className="w-4 h-4 shrink-0" /> 一覧管理
+          <List className="w-4 h-4 shrink-0" /> {messages.sidebar.manager}
         </Button>
         <Button
           onClick={onOpenSettings}
-          variant="outline"
-          className="w-full justify-start gap-2 rounded-md border border-border bg-background shadow-sm hover:bg-muted/80"
+          variant="toolbar"
+          className="w-full justify-start gap-2"
           title="設定を開く"
         >
-          <Settings className="w-4 h-4 shrink-0" /> 設定
+          <Settings className="w-4 h-4 shrink-0" /> {messages.sidebar.settings}
         </Button>
         <div className="relative">
           <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             id="app-search-input"
-            placeholder="Search..."
+            placeholder={messages.sidebar.searchPlaceholder}
             className="pl-8 bg-background/90 shadow-sm"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -132,7 +161,7 @@ export function Sidebar(props: SidebarProps) {
           <div>
             <h4 className="mb-2 px-2 text-xs font-semibold tracking-tight text-muted-foreground flex items-center justify-between gap-2">
               <span className="flex items-center gap-2">
-                <Pin className="w-3 h-3" /> Pinned
+                <Pin className="w-3 h-3" /> {messages.sidebar.pinned}
               </span>
               <span className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{pinned.length}</span>
             </h4>
@@ -149,12 +178,18 @@ export function Sidebar(props: SidebarProps) {
                   onMouseLeave={onCloseHoverPreview}
                 >
                   <span className="block min-w-0 text-left">
-                    <span className="block truncate">{n.title}</span>
+                    <span className="flex min-w-0 items-center gap-1 truncate">
+                      <span className="truncate">{n.title}</span>
+                      {renderPresentingBadge(n.path)}
+                      {n.systemNote && (
+                        <Lock className="h-3 w-3 shrink-0 text-muted-foreground" aria-label={messages.aria.builtinNote} />
+                      )}
+                    </span>
                     {renderNoteTags(n.tags)}
                   </span>
                 </Button>
               ))}
-              {pinned.length === 0 && <div className="px-2 py-1 text-xs text-muted-foreground">なし</div>}
+              {pinned.length === 0 && <div className="px-2 py-1 text-xs text-muted-foreground">{messages.sidebar.empty}</div>}
             </div>
           </div>
 
@@ -166,10 +201,10 @@ export function Sidebar(props: SidebarProps) {
                 type="button"
                 className="flex items-center gap-2 hover:text-foreground transition-colors"
                 onClick={() => setIsRecentOpen((prev) => !prev)}
-                title={isRecentOpen ? "Recent を折りたたむ" : "Recent を展開"}
+                title={isRecentOpen ? messages.sidebar.recentCollapse : messages.sidebar.recentExpand}
               >
                 {isRecentOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-                <Clock className="w-3 h-3" /> Recent
+                <Clock className="w-3 h-3" /> {messages.sidebar.recent}
               </button>
               <span className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{recent.length}</span>
             </h4>
@@ -187,45 +222,146 @@ export function Sidebar(props: SidebarProps) {
                     onMouseLeave={onCloseHoverPreview}
                   >
                     <span className="block min-w-0 text-left">
-                      <span className="block truncate">{n.title}</span>
+                      <span className="flex min-w-0 items-center gap-1 truncate">
+                        <span className="truncate">{n.title}</span>
+                        {renderPresentingBadge(n.path)}
+                      </span>
                       {renderNoteTags(n.tags)}
                     </span>
                   </Button>
                 ))}
-                {recent.length === 0 && <div className="px-2 py-1 text-xs text-muted-foreground">なし</div>}
+                {recent.length === 0 && <div className="px-2 py-1 text-xs text-muted-foreground">{messages.sidebar.empty}</div>}
               </div>
             )}
           </div>
-          {searchResults.length > 0 && (
+          {isSearching && (
             <>
               <Separator />
               <div>
                 <h4 className="mb-2 px-2 text-xs font-semibold tracking-tight text-muted-foreground flex items-center justify-between">
-                  <span>Search Results</span>
-                  <span className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{searchResults.length}</span>
+                  <span>{searchResultsTitle}</span>
+                  {searchResults.length > 0 && (
+                    <span className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{searchResults.length}</span>
+                  )}
                 </h4>
-                <div className="grid gap-1">
-                  {searchResults.slice(0, 8).map((r) => (
-                    <button
-                      key={`${r.path}:${r.line}:${r.text}`}
-                      type="button"
-                      className={`px-2 py-1 text-left text-xs rounded-md truncate transition-colors ${
-                        activeHit && activeHit.path === r.path && activeHit.line === r.line && activeHit.text === r.text
-                          ? "bg-muted text-foreground shadow-sm"
-                          : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                      }`}
-                      onClick={() => onOpenNote(r.path, r)}
-                      title={`${r.path}:${r.line}`}
-                    >
-                      L{r.line}: {r.text}
-                    </button>
-                  ))}
-                </div>
+                {searchResults.length > 0 ? (
+                  <div className="grid gap-1">
+                    {searchResults.slice(0, SIDEBAR_SEARCH_PREVIEW_LIMIT).map((r) => {
+                      const fileName = fileNameFromPath(r.path);
+                      const tagHit = isTagSearchHit(r);
+                      const lineHit = isLineSearchHit(r);
+                      const label = tagHit
+                        ? messages.sidebar.tagHit(fileName, r.text)
+                        : messages.sidebar.lineHit(r.line, r.text);
+                      const isActive = tagHit
+                        ? currentPath === r.path
+                        : Boolean(
+                            activeHit &&
+                              activeHit.path === r.path &&
+                              activeHit.line === r.line &&
+                              activeHit.text === r.text
+                          );
+                      return (
+                        <div
+                          key={`${r.path}:${r.line}:${r.text}`}
+                          className={`flex min-w-0 items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors ${
+                            isActive
+                              ? "bg-muted text-foreground shadow-sm"
+                              : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                          }`}
+                          onContextMenu={(e) => onOpenContextMenuForPath(e, r.path)}
+                        >
+                          <button
+                            type="button"
+                            className="min-w-0 flex-1 truncate text-left"
+                            onClick={() => onOpenNote(r.path, lineHit ? r : undefined)}
+                            title={label}
+                          >
+                            {label}
+                          </button>
+                          {isFuzzySearchHit(r) && <SearchFuzzyBadge />}
+                        </div>
+                      );
+                    })}
+                    {searchResults.length > SIDEBAR_SEARCH_PREVIEW_LIMIT && (
+                      <button
+                        type="button"
+                        className="px-2 py-1.5 text-left text-xs text-primary hover:underline"
+                        onClick={() => onOpenManager({ withCurrentSearch: true })}
+                      >
+                        {messages.sidebar.searchViewInManager(
+                          searchResults.length - SIDEBAR_SEARCH_PREVIEW_LIMIT
+                        )}
+                      </button>
+                    )}
+                  </div>
+                ) : searchPending ? (
+                  <div className="px-2 py-1 text-xs text-muted-foreground">{messages.sidebar.searchSearching}</div>
+                ) : searchError ? (
+                  <div className="px-2 py-1 text-xs text-destructive">{messages.status.searchFailed}</div>
+                ) : (
+                  <div className="px-2 py-1 text-xs text-muted-foreground">{messages.sidebar.searchNoResults}</div>
+                )}
               </div>
             </>
           )}
         </div>
       </ScrollArea>
+
+      {activePresentations.length > 0 && (
+        <div className="border-t bg-primary/5 px-3 py-2">
+          <h4 className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-primary">
+            <Monitor className="h-3 w-3 shrink-0" />
+            {messages.sidebar.presenting}
+            <span className="rounded bg-primary/10 px-1.5 py-0 text-[10px] font-normal">
+              {messages.sidebar.presentingCount(activePresentations.length)}
+            </span>
+          </h4>
+          <ul className="space-y-1">
+            {activePresentations.map((p) => {
+              const key = p.boundPath ?? `unsaved:${p.fileName}`;
+              const isCurrent = p.boundPath === currentPath;
+              return (
+                <li key={key} className="flex items-center gap-1">
+                  {p.boundPath ? (
+                    <button
+                      type="button"
+                      className={cn(
+                        "min-w-0 flex-1 truncate text-left text-xs hover:underline",
+                        isCurrent ? "font-medium text-foreground" : "text-muted-foreground"
+                      )}
+                      onClick={() => openPresentedNote(p.boundPath!)}
+                      title={messages.sidebar.presentingOpenNote}
+                    >
+                      {p.fileName}
+                    </button>
+                  ) : (
+                    <span
+                      className={cn(
+                        "min-w-0 flex-1 truncate text-left text-xs",
+                        isCurrent ? "font-medium text-foreground" : "text-muted-foreground"
+                      )}
+                      title={p.fileName}
+                    >
+                      {p.fileName}
+                    </span>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="h-6 w-6 shrink-0"
+                    onClick={() => reopenPresentationTab(p)}
+                    title={messages.sidebar.presentingOpenTab}
+                    aria-label={messages.sidebar.presentingOpenTab}
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
 
       <div className="p-4 border-t bg-background/70">
         <div
@@ -239,9 +375,9 @@ export function Sidebar(props: SidebarProps) {
           <Settings className="w-4 h-4 shrink-0" />
           <span
             className={`inline-block size-2 shrink-0 rounded-full ${
-              status === "Saved"
+              status === messages.status.saved
                 ? "bg-emerald-500"
-                : status === "Saving..."
+                : status === messages.status.saving
                   ? "bg-amber-500"
                   : status.includes("失敗") || status === INBOX_EXCLUSIVE_MESSAGE
                     ? "bg-red-500"

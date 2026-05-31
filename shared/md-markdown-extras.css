@@ -1,0 +1,198 @@
+/* テーブル・Mermaid など Markdown 拡張の共有スタイル（アプリプレビュー / 提示 viewer） */
+
+.md-table-wrap {
+  margin: 1rem 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.prose .md-table-wrap > table,
+.markdown-preview.prose .md-table-wrap > table,
+.prose > table,
+.prose table {
+  display: table;
+  width: 100%;
+  min-width: max-content;
+  margin: 0;
+  border-collapse: collapse;
+}
+
+.prose .md-table-wrap th,
+.prose .md-table-wrap td,
+.markdown-preview.prose .md-table-wrap th,
+.markdown-preview.prose .md-table-wrap td,
+.prose th,
+.prose td {
+  border: 1px solid var(--border);
+  padding: 0.35rem 0.6rem;
+  vertical-align: top;
+}
+
+.prose .md-table-wrap th,
+.markdown-preview.prose .md-table-wrap th,
+.prose th {
+  background: color-mix(in oklab, var(--muted) 55%, var(--background));
+  font-weight: 600;
+}
+
+.prose .md-table-wrap tr:nth-child(even) td,
+.markdown-preview.prose .md-table-wrap tr:nth-child(even) td,
+.prose tbody tr:nth-child(even) td {
+  background: color-mix(in oklab, var(--muted) 28%, var(--background));
+}
+
+.md-mermaid {
+  margin: 1rem 0;
+  overflow-x: auto;
+  text-align: center;
+}
+
+.md-mermaid .mermaid,
+.md-mermaid pre.mermaid {
+  margin: 0;
+  padding: 0.75rem;
+  background: transparent;
+  border: none;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: inherit;
+}
+
+.md-mermaid svg {
+  display: inline-block;
+  max-width: 100%;
+  height: auto;
+}
+
+/* 見出し h5/h6・インライン装飾（FE / viewer 共有） */
+
+.prose h5,
+.markdown-preview.prose h5 {
+  font-size: 1em;
+}
+
+.prose h6,
+.markdown-preview.prose h6 {
+  font-size: 0.875em;
+  color: color-mix(in oklab, var(--foreground) 88%, var(--muted-foreground));
+}
+
+.prose em,
+.markdown-preview.prose em {
+  font-style: italic;
+}
+
+.prose del,
+.markdown-preview.prose del {
+  text-decoration: line-through;
+  opacity: 0.85;
+}
+
+/* GFM タスクリスト */
+
+.prose ul.contains-task-list,
+.markdown-preview.prose ul.contains-task-list {
+  list-style: none;
+  padding-left: 0;
+}
+
+.prose li.task-list-item,
+.prose li:has(> input[type="checkbox"]),
+.markdown-preview.prose li.task-list-item,
+.markdown-preview.prose li:has(> input[type="checkbox"]) {
+  list-style: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45em;
+}
+
+.prose li.task-list-item > input[type="checkbox"],
+.prose li:has(> input[type="checkbox"]) > input[type="checkbox"],
+.markdown-preview.prose li.task-list-item > input[type="checkbox"],
+.markdown-preview.prose li:has(> input[type="checkbox"]) > input[type="checkbox"] {
+  margin: 0.35em 0 0;
+  flex: 0 0 auto;
+  accent-color: var(--primary);
+  cursor: default;
+}
+
+/* GFM 脚注 */
+
+.prose .sr-only,
+.markdown-preview.prose .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.prose section.footnotes,
+.prose [data-footnotes],
+.prose div.footnotes,
+.markdown-preview.prose section.footnotes,
+.markdown-preview.prose [data-footnotes],
+.markdown-preview.prose div.footnotes {
+  margin-top: 2em;
+  padding-top: 1em;
+  border-top: 1px solid var(--border);
+  font-size: 0.875em;
+  color: color-mix(in oklab, var(--foreground) 82%, var(--muted-foreground));
+}
+
+.prose section.footnotes > ol,
+.prose [data-footnotes] > ol,
+.prose div.footnotes > ol,
+.markdown-preview.prose section.footnotes > ol,
+.markdown-preview.prose [data-footnotes] > ol,
+.markdown-preview.prose div.footnotes > ol {
+  margin: 0.75em 0 0;
+  padding-left: 1.25em;
+}
+
+.prose section.footnotes li,
+.prose [data-footnotes] li,
+.prose div.footnotes li,
+.markdown-preview.prose section.footnotes li,
+.markdown-preview.prose [data-footnotes] li,
+.markdown-preview.prose div.footnotes li {
+  margin-top: 0.35em;
+}
+
+.prose a[data-footnote-ref],
+.prose a.footnote-reference,
+.prose .footnote-reference a,
+.markdown-preview.prose a[data-footnote-ref],
+.markdown-preview.prose a.footnote-reference,
+.markdown-preview.prose .footnote-reference a {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.prose a[data-footnote-backref],
+.prose div.footnotes a[href^="#"],
+.markdown-preview.prose a[data-footnote-backref],
+.markdown-preview.prose div.footnotes a[href^="#"] {
+  text-decoration: none;
+  margin-left: 0.25em;
+  color: var(--primary);
+}
+
+.prose sup:has(a[data-footnote-ref]),
+.prose sup.footnote-reference,
+.markdown-preview.prose sup:has(a[data-footnote-ref]),
+.markdown-preview.prose sup.footnote-reference {
+  font-size: 0.75em;
+  line-height: 0;
+}
+
+.prose div.footnotes hr,
+.markdown-preview.prose div.footnotes hr {
+  display: none;
+}

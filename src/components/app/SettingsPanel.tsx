@@ -1,46 +1,84 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { ExternalLink, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SettingsTagsSection } from "@/components/app/SettingsTagsSection";
+import { SettingsThemeSection } from "@/components/app/SettingsThemeSection";
 import type { AppConfig } from "@/types/config";
-import { DEFAULT_NEW_NOTE_TAG, isInboxTagName } from "@/lib/noteTags";
+import type { NoteMeta } from "@/types/note";
+import { handleInvokeError } from "@/lib/handleInvokeError";
+import { messages } from "@/lib/messages";
+import { useAppVersion } from "@/hooks/useAppVersion";
+import { openNotesDirInExplorer, pickNotesDirFolder, resolveNotesDirPath } from "@/lib/notesDir";
 
 type SettingsPanelProps = {
   config: AppConfig;
+  templateTags: string[];
+  orphanTags: string[];
+  notes: NoteMeta[];
+  reservedTagsInUse: string[];
   isSaving: boolean;
   /** ディスクに保存済みの内容と差分がある */
   hasUnsavedChanges: boolean;
   onChangeConfig: (next: AppConfig) => void;
   onSave: () => void;
   onClose: () => void;
-  /** 全メモのフロントマター tags とテンプレートタグの一括置換 */
+  onStatus?: (message: string) => void;
   onReplaceTagGlobally: (from: string, to: string) => Promise<void>;
+  onAddOrphanToTemplate: (tag: string) => void;
+  onRemoveTagFromAllMemos: (tag: string) => Promise<void>;
 };
 
 export function SettingsPanel(props: SettingsPanelProps) {
-  const { config, isSaving, hasUnsavedChanges, onChangeConfig, onSave, onClose, onReplaceTagGlobally } = props;
-  const [tagDraft, setTagDraft] = useState("");
-  const [replaceFrom, setReplaceFrom] = useState("");
-  const [replaceTo, setReplaceTo] = useState("");
-  const [replaceBusy, setReplaceBusy] = useState(false);
+  const {
+    config,
+    templateTags,
+    orphanTags,
+    notes,
+    reservedTagsInUse,
+    isSaving,
+    hasUnsavedChanges,
+    onChangeConfig,
+    onSave,
+    onClose,
+    onStatus,
+    onReplaceTagGlobally,
+    onAddOrphanToTemplate,
+    onRemoveTagFromAllMemos,
+  } = props;
 
-  const addTag = () => {
-    const normalized = tagDraft.trim().replace(/^#+/, "");
-    if (!normalized) return;
-    if (isInboxTagName(normalized)) {
-      setTagDraft("");
-      return;
-    }
-    if (config.templateTags.some((t) => t.toLowerCase() === normalized.toLowerCase())) {
-      setTagDraft("");
-      return;
-    }
-    onChangeConfig({ ...config, templateTags: [...config.templateTags, normalized] });
-    setTagDraft("");
+  const appVersion = useAppVersion();
+  const [notesDirBusy, setNotesDirBusy] = useState(false);
+  const [notesDirOpening, setNotesDirOpening] = useState(false);
+  const [resolvedNotesDir, setResolvedNotesDir] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void resolveNotesDirPath(config.notesDir).then((path) => {
+      if (!cancelled) setResolvedNotesDir(path);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [config.notesDir]);
+
+  const handlePickNotesDir = () => {
+    setNotesDirBusy(true);
+    void pickNotesDirFolder(config.notesDir)
+      .then((selected) => {
+        if (selected) onChangeConfig({ ...config, notesDir: selected });
+      })
+      .catch((err) => handleInvokeError(err, "pickNotesDir"))
+      .finally(() => setNotesDirBusy(false));
   };
 
-  const removeTag = (tag: string) => {
-    if (isInboxTagName(tag)) return;
-    onChangeConfig({ ...config, templateTags: config.templateTags.filter((t) => t !== tag) });
+  const handleOpenNotesDir = () => {
+    setNotesDirOpening(true);
+    void openNotesDirInExplorer(config.notesDir)
+      .catch((err) => {
+        onStatus?.(handleInvokeError(err, "openNotesDir"));
+      })
+      .finally(() => setNotesDirOpening(false));
   };
 
   return (
@@ -49,7 +87,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
         <span>設定</span>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={onClose}>
-            閉じる
+            {messages.manager.close}
           </Button>
           <Button
             size="sm"
@@ -62,7 +100,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
             onClick={onSave}
             disabled={isSaving || !hasUnsavedChanges}
           >
-            {isSaving ? "保存中..." : "保存"}
+            {isSaving ? messages.status.saving : "保存"}
           </Button>
         </div>
       </div>
@@ -72,213 +110,76 @@ export function SettingsPanel(props: SettingsPanelProps) {
           className="border-b border-amber-500/40 bg-amber-500/12 px-4 py-2 text-sm text-amber-950 dark:text-amber-100"
           role="status"
         >
-          変更が保存されていません。「保存」を押すと config.json に書き込まれます。
+          {messages.settings.unsaved}
         </div>
       )}
 
       <div className="p-4 space-y-5 overflow-y-auto">
         <section className="space-y-2">
           <h3 className="text-sm font-semibold">メモ保存先</h3>
-          <Input
-            value={config.notesDir}
-            onChange={(e) => onChangeConfig({ ...config, notesDir: e.target.value })}
-            placeholder="例: zen-memo-notes または C:\\Users\\...\\notes"
-          />
-        </section>
-
-        <section className="space-y-2">
-          <h3 className="text-sm font-semibold">表示テーマ</h3>
-          <div className="space-y-2 text-sm">
-            <label className="flex items-center gap-2">
-              <input
-                type="radio"
-                name="theme-mode"
-                checked={config.themeMode === "system"}
-                onChange={() => onChangeConfig({ ...config, themeMode: "system" })}
-                className="h-4 w-4 border-border accent-primary"
-              />
-              システム（ライト）
-            </label>
-            <label className="flex items-center gap-2">
-              <input
-                type="radio"
-                name="theme-mode"
-                checked={config.themeMode === "light"}
-                onChange={() => onChangeConfig({ ...config, themeMode: "light" })}
-                className="h-4 w-4 border-border accent-primary"
-              />
-              ライト
-            </label>
-            <label className="flex items-center gap-2">
-              <input
-                type="radio"
-                name="theme-mode"
-                checked={config.themeMode === "dark"}
-                onChange={() => onChangeConfig({ ...config, themeMode: "dark" })}
-                className="h-4 w-4 border-border accent-primary"
-              />
-              ダーク
-            </label>
-          </div>
-        </section>
-
-        <section className="space-y-2">
-          <h3 className="text-sm font-semibold">テーマプリセット</h3>
-          <div className="space-y-2 text-sm">
-            <label className="flex items-center gap-2">
-              <input
-                type="radio"
-                name="theme-preset"
-                checked={config.themePreset === "default"}
-                onChange={() => onChangeConfig({ ...config, themePreset: "default" })}
-                className="h-4 w-4 border-border accent-primary"
-              />
-              デフォルト
-            </label>
-            <label className="flex items-center gap-2">
-              <input
-                type="radio"
-                name="theme-preset"
-                checked={config.themePreset === "sepia"}
-                onChange={() => onChangeConfig({ ...config, themePreset: "sepia" })}
-                className="h-4 w-4 border-border accent-primary"
-              />
-              セピア
-            </label>
-            <label className="flex items-center gap-2">
-              <input
-                type="radio"
-                name="theme-preset"
-                checked={config.themePreset === "high-contrast"}
-                onChange={() => onChangeConfig({ ...config, themePreset: "high-contrast" })}
-                className="h-4 w-4 border-border accent-primary"
-              />
-              ハイコントラスト
-            </label>
-          </div>
-        </section>
-
-        <section className="space-y-2">
-          <h3 className="text-sm font-semibold">テンプレートタグ</h3>
-          <p className="text-xs text-muted-foreground">
-            「{DEFAULT_NEW_NOTE_TAG}」は受信箱用に固定され、削除・重複追加はできません。
-          </p>
-          <div className="flex gap-2">
-            <Input
-              value={tagDraft}
-              onChange={(e) => setTagDraft(e.target.value)}
-              placeholder="例: meeting"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addTag();
-                }
-              }}
-            />
-            <Button type="button" variant="outline" onClick={addTag}>
-              追加
-            </Button>
-          </div>
           <div className="flex flex-wrap gap-2">
-            {config.templateTags.map((tag) =>
-              isInboxTagName(tag) ? (
-                <span
-                  key={tag}
-                  className="rounded-md border border-border bg-muted/50 px-2 py-1 text-xs text-muted-foreground"
-                  title="受信箱タグ（固定）"
-                >
-                  #{tag}
-                </span>
-              ) : (
-                <button
-                  key={tag}
-                  type="button"
-                  className="rounded-md border border-border bg-muted px-2 py-1 text-xs hover:bg-muted/70"
-                  onClick={() => removeTag(tag)}
-                  title="クリックで削除"
-                >
-                  #{tag} ×
-                </button>
-              )
-            )}
-            {config.templateTags.length === 0 && (
-              <div className="text-xs text-muted-foreground">タグがありません</div>
-            )}
-          </div>
-        </section>
-
-        <section className="space-y-2 border-t border-border pt-5">
-          <h3 className="text-sm font-semibold">タグの一括置換</h3>
-          <p className="text-xs text-muted-foreground">
-            メモ保存先のすべての <code className="rounded bg-muted px-1">.md</code> の先頭 YAML{" "}
-            <code className="rounded bg-muted px-1">tags:</code> 行だけを対象にします。タグ名の大文字小文字は同一視します。
-            置換後は inbox 以外が残る場合は inbox は外れます（エディタのタグ操作と同じルール）。テンプレートタグ一覧に同じ名前があれば{" "}
-            <code className="rounded bg-muted px-1">config.json</code> も更新されます。
-          </p>
-          <div className="flex flex-wrap items-end gap-2">
-            <div className="flex min-w-[120px] flex-1 flex-col gap-1">
-              <label className="text-xs text-muted-foreground" htmlFor="tag-replace-from">
-                置換元
-              </label>
-              <Input
-                id="tag-replace-from"
-                value={replaceFrom}
-                onChange={(e) => setReplaceFrom(e.target.value)}
-                placeholder="例: educ."
-                disabled={replaceBusy}
-              />
-            </div>
-            <div className="flex min-w-[120px] flex-1 flex-col gap-1">
-              <label className="text-xs text-muted-foreground" htmlFor="tag-replace-to">
-                置換先
-              </label>
-              <Input
-                id="tag-replace-to"
-                value={replaceTo}
-                onChange={(e) => setReplaceTo(e.target.value)}
-                placeholder="例: 教育"
-                disabled={replaceBusy}
-              />
-            </div>
+            <Input
+              className="min-w-[12rem] flex-1"
+              value={config.notesDir}
+              onChange={(e) => onChangeConfig({ ...config, notesDir: e.target.value })}
+              placeholder={messages.settings.notesDirPlaceholder}
+            />
             <Button
               type="button"
-              variant="secondary"
-              disabled={
-                replaceBusy ||
-                !replaceFrom.trim() ||
-                !replaceTo.trim() ||
-                replaceFrom.trim().toLowerCase() === replaceTo.trim().toLowerCase()
-              }
-              onClick={() => {
-                const from = replaceFrom.trim();
-                const to = replaceTo.trim();
-                if (!from || !to) return;
-                if (from.toLowerCase() === to.toLowerCase()) return;
-                const ok = window.confirm(
-                  `すべてのメモの tags に含まれる「${from}」を「${to}」に置き換えます（大文字小文字は同一視）。テンプレートに同じ名前があれば config も更新します。実行しますか？`
-                );
-                if (!ok) return;
-                setReplaceBusy(true);
-                void onReplaceTagGlobally(from, to)
-                  .then(() => {
-                    setReplaceFrom("");
-                    setReplaceTo("");
-                  })
-                  .catch((err: unknown) => {
-                    console.error(err);
-                    window.alert(err instanceof Error ? err.message : String(err));
-                  })
-                  .finally(() => {
-                    setReplaceBusy(false);
-                  });
-              }}
+              variant="outline"
+              className="shrink-0"
+              disabled={notesDirBusy || !config.notesDir.trim()}
+              onClick={handleOpenNotesDir}
             >
-              {replaceBusy ? "実行中…" : "全メモに適用"}
+              <ExternalLink className="h-4 w-4" />
+              {messages.settings.notesDirOpen}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="shrink-0"
+              disabled={notesDirBusy || notesDirOpening}
+              onClick={handlePickNotesDir}
+            >
+              <FolderOpen className="h-4 w-4" />
+              {messages.settings.notesDirBrowse}
             </Button>
           </div>
+          {resolvedNotesDir && (
+            <p className="text-xs text-muted-foreground break-all">
+              {messages.settings.notesDirResolved(resolvedNotesDir)}
+            </p>
+          )}
+          <p className="text-xs text-muted-foreground">{messages.settings.notesDirHint}</p>
+        </section>
+
+        <SettingsThemeSection
+          themeMode={config.themeMode}
+          themePreset={config.themePreset}
+          onChangeThemeMode={(themeMode) => onChangeConfig({ ...config, themeMode })}
+          onChangeThemePreset={(themePreset) => onChangeConfig({ ...config, themePreset })}
+        />
+
+        <SettingsTagsSection
+          config={config}
+          templateTags={templateTags}
+          orphanTags={orphanTags}
+          notes={notes}
+          reservedTagsInUse={reservedTagsInUse}
+          onChangeConfig={onChangeConfig}
+          onReplaceTagGlobally={onReplaceTagGlobally}
+          onAddOrphanToTemplate={onAddOrphanToTemplate}
+          onRemoveTagFromAllMemos={onRemoveTagFromAllMemos}
+        />
+
+        <section className="space-y-1 border-t pt-5">
+          <h3 className="text-sm font-semibold">{messages.settings.aboutTitle}</h3>
+          <p className="text-sm text-foreground">{messages.sidebar.appName}</p>
+          <p className="text-xs text-muted-foreground tabular-nums">
+            {appVersion ? messages.settings.version(appVersion) : "…"}
+          </p>
         </section>
       </div>
     </main>
   );
 }
-

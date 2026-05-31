@@ -1,10 +1,18 @@
 /** メモ先頭の YAML フロントマターから tags を読み書き（本文は見出しと衝突しない） */
 
+import {
+  getReservedTagBlockedMessage,
+  isBuiltinReservedTagName,
+} from "@/lib/reservedTags";
+import type { NoteMeta } from "@/types/note";
+
 /** 受信箱タグ（大文字小文字は区別しない）。他タグが 1 つでもあれば外し、タグが無ければこれだけにする */
 export const DEFAULT_NEW_NOTE_TAG = "inbox";
 
+import { messages } from "@/lib/messages";
+
 /** 他タグがある状態で inbox を追加しようとしたときの案内（ステータス表示用） */
-export const INBOX_EXCLUSIVE_MESSAGE = "inbox は他のタグと併用できません";
+export const INBOX_EXCLUSIVE_MESSAGE = messages.tags.inboxExclusive;
 
 export function isInboxTagName(tag: string): boolean {
   return tag.trim().replace(/^#+/, "").toLowerCase() === DEFAULT_NEW_NOTE_TAG.toLowerCase();
@@ -25,14 +33,65 @@ export function getInboxAddBlockedMessage(content: string, rawTag: string): stri
   return null;
 }
 
-/** テンプレート一覧の先頭に固定の inbox を 1 つだけ置く（表記は DEFAULT_NEW_NOTE_TAG に統一） */
+/** inbox / 予約タグの操作をブロックするときの案内 */
+export function getTagToggleBlockedMessage(content: string, rawTag: string): string | null {
+  return getInboxAddBlockedMessage(content, rawTag) ?? getReservedTagBlockedMessage(content, rawTag);
+}
+
+/** テンプレート一覧の先頭に固定の inbox を 1 つだけ置く（予約タグは除外） */
 export function ensureLockedInboxInTemplateTags(templateTags: string[]): string[] {
-  const rest = templateTags.filter((t) => !isInboxTagName(t));
+  const rest = templateTags.filter((t) => !isInboxTagName(t) && !isBuiltinReservedTagName(t));
   return [DEFAULT_NEW_NOTE_TAG, ...rest];
 }
 
+/** 全メモのフロントマター tags を重複除去して収集 */
+export function collectTagsFromNotes(notes: Pick<NoteMeta, "tags">[]): string[] {
+  return dedupeTagsCaseInsensitive(notes.flatMap((n) => n.tags));
+}
+
+/**
+ * 2つのタグ一覧をマージ（永続化はしない）。エディタのチップ用。
+ * inbox は先頭固定、`_builtin` は含めない。
+ */
+export function mergeTagLists(primary: string[], secondary: string[]): string[] {
+  const base = ensureLockedInboxInTemplateTags(primary);
+  const seen = new Set(base.map((t) => t.toLowerCase()));
+  const additions: string[] = [];
+
+  for (const tag of secondary) {
+    if (isInboxTagName(tag) || isBuiltinReservedTagName(tag)) continue;
+    const key = tag.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    additions.push(tag);
+  }
+
+  additions.sort((a, b) => a.localeCompare(b, "ja"));
+  return [...base, ...additions];
+}
+
+/** テンプレートに未登録だが、いずれかのメモで使用中のタグ */
+export function getOrphanTags(templateTags: string[], tagsInUse: string[]): string[] {
+  const registered = new Set(ensureLockedInboxInTemplateTags(templateTags).map((t) => t.toLowerCase()));
+  return tagsInUse
+    .filter((tag) => {
+      if (isInboxTagName(tag) || isBuiltinReservedTagName(tag)) return false;
+      return !registered.has(tag.toLowerCase());
+    })
+    .sort((a, b) => a.localeCompare(b, "ja"));
+}
+
+export function countNotesWithTag(notes: Pick<NoteMeta, "tags">[], tag: string): number {
+  const key = tag.toLowerCase();
+  return notes.filter((n) => n.tags.some((t) => t.toLowerCase() === key)).length;
+}
+
+export function buildEditorTagChips(templateTags: string[], noteTags: string[]): string[] {
+  return mergeTagLists(templateTags, noteTags);
+}
+
 /** Inbox 以外が 1 つでもあれば Inbox を全て外す。それ以外は Inbox のみ */
-function normalizeInboxExclusiveTags(tags: string[]): string[] {
+export function normalizeInboxExclusiveTags(tags: string[]): string[] {
   const inboxL = DEFAULT_NEW_NOTE_TAG.toLowerCase();
   const withoutInbox = tags.filter((t) => t.toLowerCase() !== inboxL);
   if (withoutInbox.length > 0) {
@@ -112,9 +171,21 @@ export function replaceTagTokenInList(tags: string[], from: string, to: string):
   return tags.map((t) => (t.toLowerCase() === f ? toVal : t));
 }
 
+export function rebuildNoteFrontmatterTags(raw: string, nextTags: string[]): string | null {
+  const p = parseNoteContent(raw);
+  if (!p.hasFrontmatter) return null;
+  const fmLines = p.frontmatterRaw
+    .split(/\r?\n/)
+    .filter((l) => !/^\s*tags\s*:/i.test(l))
+    .filter((l) => l.trim().length > 0);
+  fmLines.push(`tags: ${nextTags.join(", ")}`);
+  return `---\n${fmLines.join("\n")}\n---\n${p.body}`;
+}
+
 export function toggleTagInContent(raw: string, tag: string): string {
   const normalized = tag.trim().replace(/^#+/, "");
   if (!normalized) return raw;
+  if (isBuiltinReservedTagName(normalized)) return raw;
 
   const p = parseNoteContent(raw);
   const baseBody = p.hasFrontmatter ? p.body : raw;
@@ -126,10 +197,8 @@ export function toggleTagInContent(raw: string, tag: string): string {
 
   nextTags = normalizeInboxExclusiveTags(nextTags);
 
-  const fmLines = p.hasFrontmatter
-    ? p.frontmatterRaw.split(/\r?\n/).filter((l) => !/^\s*tags\s*:/i.test(l)).filter((l) => l.trim().length > 0)
-    : [];
-
-  fmLines.push(`tags: ${nextTags.join(", ")}`);
-  return `---\n${fmLines.join("\n")}\n---\n${baseBody}`;
+  if (p.hasFrontmatter) {
+    return rebuildNoteFrontmatterTags(raw, nextTags) ?? raw;
+  }
+  return `---\ntags: ${nextTags.join(", ")}\n---\n${baseBody}`;
 }

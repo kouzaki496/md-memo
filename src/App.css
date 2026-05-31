@@ -4,6 +4,9 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/noto-sans";
 @import "@fontsource-variable/playfair-display";
+@import "../shared/md-callout.css";
+@import "../shared/md-markdown-extras.css";
+@import "../shared/theme-presets.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -76,86 +79,6 @@
   --sidebar-ring: oklch(0.68 0.1 265);
 }
 
-html[data-theme-preset="sepia"] {
-  --background: oklch(0.97 0.02 85);
-  --foreground: oklch(0.32 0.03 68);
-  --card: oklch(0.99 0.012 84);
-  --card-foreground: oklch(0.3 0.03 68);
-  --popover: oklch(0.99 0.012 84);
-  --popover-foreground: oklch(0.3 0.03 68);
-  --primary: oklch(0.56 0.08 55);
-  --primary-foreground: oklch(0.98 0.01 85);
-  --secondary: oklch(0.93 0.02 82);
-  --secondary-foreground: oklch(0.34 0.03 65);
-  --muted: oklch(0.945 0.015 84);
-  --muted-foreground: oklch(0.48 0.025 66);
-  --accent: oklch(0.92 0.03 76);
-  --accent-foreground: oklch(0.34 0.03 65);
-  --border: oklch(0.85 0.018 78);
-  --input: oklch(0.88 0.017 78);
-  --ring: oklch(0.58 0.07 58);
-}
-
-html.dark[data-theme-preset="sepia"] {
-  --background: oklch(0.24 0.02 70);
-  --foreground: oklch(0.91 0.02 88);
-  --card: oklch(0.275 0.022 72);
-  --card-foreground: oklch(0.91 0.02 88);
-  --popover: oklch(0.275 0.022 72);
-  --popover-foreground: oklch(0.91 0.02 88);
-  --primary: oklch(0.72 0.09 68);
-  --primary-foreground: oklch(0.2 0.025 66);
-  --secondary: oklch(0.34 0.022 72);
-  --secondary-foreground: oklch(0.91 0.02 88);
-  --muted: oklch(0.31 0.02 72);
-  --muted-foreground: oklch(0.78 0.02 85);
-  --accent: oklch(0.37 0.03 68);
-  --accent-foreground: oklch(0.9 0.018 88);
-  --border: oklch(0.43 0.02 74);
-  --input: oklch(0.38 0.02 74);
-  --ring: oklch(0.74 0.09 70);
-}
-
-html[data-theme-preset="high-contrast"] {
-  --background: oklch(0.995 0 0);
-  --foreground: oklch(0.14 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.14 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.14 0 0);
-  --primary: oklch(0.38 0.22 262);
-  --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.92 0 0);
-  --secondary-foreground: oklch(0.12 0 0);
-  --muted: oklch(0.92 0 0);
-  --muted-foreground: oklch(0.3 0 0);
-  --accent: oklch(0.88 0.02 250);
-  --accent-foreground: oklch(0.12 0 0);
-  --border: oklch(0.2 0 0);
-  --input: oklch(0.2 0 0);
-  --ring: oklch(0.4 0.22 262);
-}
-
-html.dark[data-theme-preset="high-contrast"] {
-  --background: oklch(0.14 0 0);
-  --foreground: oklch(0.97 0 0);
-  --card: oklch(0.18 0 0);
-  --card-foreground: oklch(0.97 0 0);
-  --popover: oklch(0.18 0 0);
-  --popover-foreground: oklch(0.97 0 0);
-  --primary: oklch(0.78 0.19 262);
-  --primary-foreground: oklch(0.08 0 0);
-  --secondary: oklch(0.24 0 0);
-  --secondary-foreground: oklch(0.96 0 0);
-  --muted: oklch(0.24 0 0);
-  --muted-foreground: oklch(0.8 0 0);
-  --accent: oklch(0.33 0.03 260);
-  --accent-foreground: oklch(0.96 0 0);
-  --border: oklch(0.84 0 0);
-  --input: oklch(0.84 0 0);
-  --ring: oklch(0.82 0.19 262);
-}
-
 @theme inline {
   --font-sans: 'Noto Sans Variable', sans-serif;
   --font-heading: 'Playfair Display Variable', serif;
@@ -221,15 +144,6 @@ html.dark[data-theme-preset="high-contrast"] {
   border: 1px solid transparent;
 }
 
-.markdown-preview .md-callout__icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 0;
-  margin-top: 0.18rem;
-  flex: 0 0 auto;
-}
-
 .markdown-preview .md-callout__body {
   min-width: 0;
   flex: 1 1 auto;
@@ -243,47 +157,11 @@ html.dark[data-theme-preset="high-contrast"] {
   margin-bottom: 0;
 }
 
-.markdown-preview .md-callout--info {
-  background: #cfe3c1;
-  color: #1f331d;
-}
-
-.markdown-preview .md-callout--info .md-callout__icon {
-  color: #2b7e1f;
-}
-
-.markdown-preview .md-callout--tip {
-  background: #cbe8dc;
-  color: #17382d;
-}
-
-.markdown-preview .md-callout--tip .md-callout__icon {
-  color: #197a58;
-}
-
-.markdown-preview .md-callout--warn {
-  background: #f1e2a9;
-  color: #3f3208;
-}
-
-.markdown-preview .md-callout--warn .md-callout__icon {
-  color: #ad8600;
-}
-
-.markdown-preview .md-callout--alert {
-  background: #edc8cc;
-  color: #42161a;
-}
-
-.markdown-preview .md-callout--alert .md-callout__icon {
-  color: #bf0f0f;
-}
-
 .markdown-preview .md-callout > :last-child {
   margin-bottom: 0;
 }
 
-.markdown-preview :not(pre) > code {
+.markdown-preview :is(p, li, td, th, blockquote, h1, h2, h3, h4, h5, h6, dd) > code {
   background: color-mix(in oklab, var(--muted) 82%, var(--background));
   border: 1px solid color-mix(in oklab, var(--border) 86%, var(--background));
   border-radius: 0.38rem;
@@ -292,33 +170,125 @@ html.dark[data-theme-preset="high-contrast"] {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
-.markdown-preview :not(pre) > code::before,
-.markdown-preview :not(pre) > code::after {
+.markdown-preview :is(p, li, td, th, blockquote, h1, h2, h3, h4, h5, h6, dd) > code::before,
+.markdown-preview :is(p, li, td, th, blockquote, h1, h2, h3, h4, h5, h6, dd) > code::after {
   content: none;
 }
 
-.markdown-preview .preview-body-selection {
-  margin: 0.08em 0;
-  padding: 0.15em 0.28em;
-  border-radius: 0.35rem;
-  background: oklch(0.93 0.08 102);
-  box-shadow: inset 0 0 0 1px oklch(0.78 0.12 102 / 0.5);
-  box-decoration-break: clone;
-  -webkit-box-decoration-break: clone;
+.markdown-preview .md-code-block,
+.markdown-preview div[class*="language-"] {
+  margin: 0.75rem 0 !important;
+  overflow-x: auto;
+  border-radius: 0.375rem;
+  background: #1e1e1e !important;
+  color: #d4d4d4;
+  --tw-prose-code: #d4d4d4;
+  --tw-prose-pre-code: #d4d4d4;
 }
 
-.dark .markdown-preview .preview-body-selection {
-  background: oklch(0.68 0.11 102 / 0.34);
-  box-shadow: inset 0 0 0 1px oklch(0.78 0.11 102 / 0.62);
+.markdown-preview .md-code-block code,
+.markdown-preview div[class*="language-"] code {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  color: #d4d4d4 !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.875em;
+  line-height: 1.6;
+  tab-size: 2;
 }
 
-.markdown-preview .md-callout.preview-callout-selection {
-  outline: 2px solid oklch(0.74 0.15 103 / 0.95);
-  outline-offset: 1px;
+.markdown-preview .md-code-block :is(span, .token),
+.markdown-preview div[class*="language-"] :is(span, .token) {
+  background: transparent !important;
+  background-color: transparent !important;
 }
 
-.dark .markdown-preview .md-callout.preview-callout-selection {
-  outline-color: oklch(0.78 0.13 102 / 0.8);
+/* prose のライトモード配色をコードブロック内に適用しない */
+.markdown-preview.prose :where(.md-code-block, .md-code-block *) {
+  --tw-prose-code: #d4d4d4;
+  --tw-prose-pre-code: #d4d4d4;
+}
+
+.markdown-preview.prose :where(.md-code-block pre) {
+  color: #d4d4d4 !important;
+}
+
+.markdown-preview img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0.75rem 0;
+  border-radius: 0.375rem;
+}
+
+.md-image-missing {
+  margin: 0.75rem 0;
+}
+
+.md-image-missing__inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 1.25rem 1rem;
+  border: 1px dashed color-mix(in oklab, var(--border) 88%, var(--background));
+  border-radius: 0.375rem;
+  background: color-mix(in oklab, var(--muted) 42%, var(--background));
+  text-align: center;
+}
+
+.md-image-missing--loading .md-image-missing__inner {
+  padding: 1.5rem 1rem;
+}
+
+.md-image-missing__skeleton {
+  width: min(100%, 12rem);
+  height: 5rem;
+  border-radius: 0.375rem;
+  background: color-mix(in oklab, var(--muted) 70%, var(--background));
+  animation: md-image-missing-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes md-image-missing-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.md-image-missing__icon {
+  width: 1.35rem;
+  height: 1.35rem;
+  color: var(--muted-foreground);
+}
+
+.md-image-missing__label {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+
+.md-image-missing__alt {
+  margin: 0;
+  max-width: 100%;
+  font-size: 0.8125rem;
+  color: var(--foreground);
+}
+
+.md-image-missing__path {
+  margin: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.6875rem;
+  color: color-mix(in oklab, var(--muted-foreground) 88%, var(--foreground));
 }
 
 .pane-resizer {

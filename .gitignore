@@ -24,6 +24,9 @@ dist-ssr
 # 旧保存先など、ローカルでできたメモ（リポジトリのテンプレには含めない）
 src-tauri/notes/
 
+# 開発者用ローカルメモ（仕様メモ・検討メモなど）
+dev/
+
 # Windows
 Thumbs.db
 ehthumbs.db

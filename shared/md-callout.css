@@ -1,0 +1,116 @@
+/**
+ * Callout 色・背景の単一ソース（#10）。
+ * FE: App.css から @import / Rust: presentation/viewer_html.rs から include_str!
+ */
+
+:root {
+  --md-callout-info-bg: #cfe3c1;
+  --md-callout-info-fg: #1f331d;
+  --md-callout-info-accent: #2b7e1f;
+  --md-callout-tip-bg: #cbe8dc;
+  --md-callout-tip-fg: #17382d;
+  --md-callout-tip-accent: #197a58;
+  --md-callout-warn-bg: #f1e2a9;
+  --md-callout-warn-fg: #3f3208;
+  --md-callout-warn-accent: #ad8600;
+  --md-callout-alert-bg: #edc8cc;
+  --md-callout-alert-fg: #42161a;
+  --md-callout-alert-accent: #bf0f0f;
+}
+
+html.dark {
+  --md-callout-info-bg: #2a3d28;
+  --md-callout-info-fg: #d8ecd0;
+  --md-callout-info-accent: #d8ecd0;
+  --md-callout-tip-bg: #1e3d32;
+  --md-callout-tip-fg: #c8ebe0;
+  --md-callout-tip-accent: #c8ebe0;
+  --md-callout-warn-bg: #3d3418;
+  --md-callout-warn-fg: #f1e2a9;
+  --md-callout-warn-accent: #f1e2a9;
+  --md-callout-alert-bg: #3d2226;
+  --md-callout-alert-fg: #f0c8cc;
+  --md-callout-alert-accent: #f0c8cc;
+}
+
+.md-callout--info {
+  background: var(--md-callout-info-bg);
+  color: var(--md-callout-info-fg);
+}
+
+.md-callout--info .md-callout__icon {
+  color: var(--md-callout-info-accent);
+}
+
+.md-callout--tip {
+  background: var(--md-callout-tip-bg);
+  color: var(--md-callout-tip-fg);
+}
+
+.md-callout--tip .md-callout__icon {
+  color: var(--md-callout-tip-accent);
+}
+
+.md-callout--warn {
+  background: var(--md-callout-warn-bg);
+  color: var(--md-callout-warn-fg);
+}
+
+.md-callout--warn .md-callout__icon {
+  color: var(--md-callout-warn-accent);
+}
+
+.md-callout--alert {
+  background: var(--md-callout-alert-bg);
+  color: var(--md-callout-alert-fg);
+}
+
+.md-callout--alert .md-callout__icon {
+  color: var(--md-callout-alert-accent);
+}
+
+.md-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  margin: 1rem 0;
+  border-radius: 0.65rem;
+  padding: 0.95rem 1.1rem;
+  border: 1px solid transparent;
+}
+
+.md-callout__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+  margin-top: 0.18rem;
+  flex: 0 0 auto;
+}
+
+.md-callout__icon svg {
+  display: block;
+}
+
+.md-callout__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.md-callout__body > :first-child {
+  margin-top: 0;
+}
+
+.md-callout__body > :last-child {
+  margin-bottom: 0;
+}
+
+@media print {
+  .md-callout--info,
+  .md-callout--tip,
+  .md-callout--warn,
+  .md-callout--alert {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

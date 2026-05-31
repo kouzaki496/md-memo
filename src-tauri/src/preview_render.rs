@@ -1,0 +1,487 @@
+//! アプリプレビュー相当の Markdown 本文 HTML（情報共有向け・完全一致は目指さない）
+
+use pulldown_cmark::{html, Options, Parser};
+use regex::Regex;
+use std::sync::LazyLock;
+use syntect::highlighting::ThemeSet;
+use syntect::html::highlighted_html_for_string;
+use syntect::parsing::SyntaxSet;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CalloutKind {
+    Info,
+    Warn,
+    Alert,
+    Tip,
+}
+
+impl CalloutKind {
+    fn from_str(raw: Option<&str>) -> Self {
+        match raw.unwrap_or("info").to_lowercase().as_str() {
+            "warn" => Self::Warn,
+            "alert" => Self::Alert,
+            "tip" => Self::Tip,
+            _ => Self::Info,
+        }
+    }
+
+    fn css_class(self) -> &'static str {
+        match self {
+            Self::Info => "info",
+            Self::Warn => "warn",
+            Self::Alert => "alert",
+            Self::Tip => "tip",
+        }
+    }
+
+    fn icon_svg(self) -> &'static str {
+        match self {
+            Self::Info => include_str!("../../shared/callout-icon-info.svg"),
+            Self::Warn => include_str!("../../shared/callout-icon-warn.svg"),
+            Self::Alert => include_str!("../../shared/callout-icon-alert.svg"),
+            Self::Tip => include_str!("../../shared/callout-icon-tip.svg"),
+        }
+    }
+}
+
+enum PreviewSegment {
+    Markdown(String),
+    Callout { kind: CalloutKind, content: String },
+}
+
+static RE_BLOCK_START: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)^:::\s*note(?:\s+(info|warn|alert|tip))?\s*$").unwrap());
+static RE_BLOCK_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^:::\s*$").unwrap());
+static RE_SINGLE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)^note::(info|warn|alert|tip)\s+(.+)$").unwrap());
+static RE_MULTI_START: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)^note::(info|warn|alert|tip)\s*$").unwrap());
+static RE_MULTI_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^::note\s*$").unwrap());
+static RE_ORDERED_LIST: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d+\.\s").unwrap());
+static RE_UNORDERED_LIST: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[-*+]\s").unwrap());
+static RE_TASK_LIST: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[-*+]\s\[[ xX]\]\s").unwrap());
+static RE_PRE_CODE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?s)<pre><code(?: class="language-([^"]*)")?>(.*?)</code></pre>"#).unwrap()
+});
+static RE_TABLE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)<table(\s[^>]*)?>(.*?)</table>").unwrap());
+static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
+
+/// remark-breaks 相当: 段落内の単一改行を hard break にする（コードブロック内は除外）
+fn is_block_start(line: &str) -> bool {
+    let t = line.trim_start();
+    if t.is_empty() {
+        return true;
+    }
+    t.starts_with('#')
+        || t.starts_with("```")
+        || t.starts_with('>')
+        || t.starts_with('|')
+        || RE_UNORDERED_LIST.is_match(t)
+        || RE_TASK_LIST.is_match(t)
+        || RE_ORDERED_LIST.is_match(t)
+}
+
+fn apply_remark_breaks(md: &str) -> String {
+    let lines: Vec<&str> = md.lines().collect();
+    if lines.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    let mut in_fence = false;
+
+    for (i, line) in lines.iter().enumerate() {
+        if i > 0 {
+            if in_fence {
+                out.push('\n');
+            } else {
+                let prev = lines[i - 1];
+                let hard_break = !prev.trim().is_empty()
+                    && !line.trim().is_empty()
+                    && !is_block_start(prev)
+                    && !is_block_start(*line);
+                if hard_break {
+                    out.push_str("  \n");
+                } else {
+                    out.push('\n');
+                }
+            }
+        }
+        if line.trim_start().starts_with("```") {
+            in_fence = !in_fence;
+        }
+        out.push_str(line);
+    }
+    out
+}
+
+fn split_preview_segments(markdown: &str) -> Vec<PreviewSegment> {
+    let lines: Vec<&str> = markdown.lines().collect();
+    let mut segments: Vec<PreviewSegment> = Vec::new();
+    let mut plain_buffer: Vec<&str> = Vec::new();
+
+    let flush_plain = |buffer: &mut Vec<&str>, segments: &mut Vec<PreviewSegment>| {
+        if buffer.is_empty() {
+            return;
+        }
+        segments.push(PreviewSegment::Markdown(buffer.join("\n")));
+        buffer.clear();
+    };
+
+    let mut i = 0usize;
+    while i < lines.len() {
+        let line = lines[i];
+
+        if let Some(caps) = RE_BLOCK_START.captures(line) {
+            flush_plain(&mut plain_buffer, &mut segments);
+            let kind = CalloutKind::from_str(caps.get(1).map(|m| m.as_str()));
+            let mut callout_lines: Vec<&str> = Vec::new();
+            let mut found_end = false;
+            let mut j = i + 1;
+            while j < lines.len() {
+                if RE_BLOCK_END.is_match(lines[j]) {
+                    i = j;
+                    found_end = true;
+                    break;
+                }
+                callout_lines.push(lines[j]);
+                j += 1;
+            }
+
+            if found_end {
+                segments.push(PreviewSegment::Callout {
+                    kind,
+                    content: callout_lines.join("\n").trim().to_string(),
+                });
+            } else {
+                plain_buffer.push(line);
+                plain_buffer.extend_from_slice(&callout_lines);
+                break;
+            }
+            i += 1;
+            continue;
+        }
+
+        if let Some(caps) = RE_SINGLE.captures(line) {
+            flush_plain(&mut plain_buffer, &mut segments);
+            segments.push(PreviewSegment::Callout {
+                kind: CalloutKind::from_str(caps.get(1).map(|m| m.as_str())),
+                content: caps.get(2).map(|m| m.as_str()).unwrap_or("").to_string(),
+            });
+            i += 1;
+            continue;
+        }
+
+        if let Some(caps) = RE_MULTI_START.captures(line) {
+            flush_plain(&mut plain_buffer, &mut segments);
+            let kind = CalloutKind::from_str(caps.get(1).map(|m| m.as_str()));
+            let mut callout_lines: Vec<&str> = Vec::new();
+            let mut found_end = false;
+            let mut j = i + 1;
+            while j < lines.len() {
+                if RE_MULTI_END.is_match(lines[j]) {
+                    i = j;
+                    found_end = true;
+                    break;
+                }
+                callout_lines.push(lines[j]);
+                j += 1;
+            }
+
+            if found_end {
+                segments.push(PreviewSegment::Callout {
+                    kind,
+                    content: callout_lines.join("\n").trim().to_string(),
+                });
+            } else {
+                plain_buffer.push(line);
+                plain_buffer.extend_from_slice(&callout_lines);
+                break;
+            }
+            i += 1;
+            continue;
+        }
+
+        plain_buffer.push(line);
+        i += 1;
+    }
+
+    flush_plain(&mut plain_buffer, &mut segments);
+    segments
+}
+
+fn markdown_fragment_to_html(md: &str) -> String {
+    if md.trim().is_empty() {
+        return String::new();
+    }
+    let md = apply_remark_breaks(md);
+    let mut options = Options::empty();
+    options.insert(
+        Options::ENABLE_STRIKETHROUGH
+            | Options::ENABLE_TABLES
+            | Options::ENABLE_TASKLISTS
+            | Options::ENABLE_FOOTNOTES,
+    );
+    let parser = Parser::new_ext(&md, options);
+    let mut html_out = String::new();
+    html::push_html(&mut html_out, parser);
+    html_out
+}
+
+fn render_callout(kind: CalloutKind, content: &str) -> String {
+    let body = markdown_fragment_to_html(content);
+    format!(
+        r#"<div class="md-callout md-callout--{class}" role="note"><span class="md-callout__icon" aria-hidden="true">{icon}</span><div class="md-callout__body">{body}</div></div>"#,
+        class = kind.css_class(),
+        icon = kind.icon_svg(),
+        body = if body.is_empty() { String::new() } else { body },
+    )
+}
+
+/// メモ本文（フロントマター除去済み）を提示用 HTML に変換する。
+pub fn render_note_body_html(body: &str) -> String {
+    let segments = split_preview_segments(body);
+    if segments.is_empty() {
+        return String::from("<p>（空）</p>");
+    }
+
+    let mut out = String::new();
+    for segment in segments {
+        match segment {
+            PreviewSegment::Markdown(md) => {
+                let html = markdown_fragment_to_html(&md);
+                if !html.is_empty() {
+                    out.push_str(&html);
+                }
+            }
+            PreviewSegment::Callout { kind, content } => {
+                out.push_str(&render_callout(kind, &content));
+            }
+        }
+    }
+
+    if out.is_empty() {
+        String::from("<p>（空）</p>")
+    } else {
+        out
+    }
+}
+
+pub(crate) fn normalize_callout_kind(raw: Option<&str>) -> &'static str {
+    CalloutKind::from_str(raw).css_class()
+}
+
+pub(crate) fn split_preview_segments_contract(
+    markdown: &str,
+) -> Vec<(String, Option<String>, String)> {
+    split_preview_segments(markdown)
+        .into_iter()
+        .map(|segment| match segment {
+            PreviewSegment::Markdown(content) => ("markdown".to_string(), None, content),
+            PreviewSegment::Callout { kind, content } => {
+                ("callout".to_string(), Some(kind.css_class().to_string()), content)
+            }
+        })
+        .collect()
+}
+
+fn decode_html_entities(text: &str) -> String {
+    text.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+}
+
+fn pick_theme() -> syntect::highlighting::Theme {
+    let ts = &*THEME_SET;
+    for name in ["Visual Studio Dark+", "base16-ocean.dark", "InspiredGitHub"] {
+        if let Some(theme) = ts.themes.get(name) {
+            return theme.clone();
+        }
+    }
+    ts.themes
+        .values()
+        .next()
+        .cloned()
+        .expect("default syntax themes missing")
+}
+
+fn normalize_lang(lang: &str) -> String {
+    match lang.to_lowercase().as_str() {
+        "ts" => "typescript".to_string(),
+        "js" => "javascript".to_string(),
+        "py" => "python".to_string(),
+        "rb" => "ruby".to_string(),
+        "yml" => "yaml".to_string(),
+        "sh" | "shell" | "zsh" => "bash".to_string(),
+        "md" => "markdown".to_string(),
+        "rs" => "rust".to_string(),
+        "golang" => "go".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn is_mermaid_lang(lang: &str) -> bool {
+    matches!(lang.to_lowercase().as_str(), "mermaid" | "mmd")
+}
+
+fn escape_html_text(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+/// 提示 HTML 内の `<pre><code>` を syntect でハイライトする（常にダーク背景）。mermaid は描画用マークアップに差し替える。
+pub fn highlight_code_blocks_in_html(html: &str) -> String {
+    let theme = pick_theme();
+    RE_PRE_CODE
+        .replace_all(html, |caps: &regex::Captures| {
+            let lang = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            let code = decode_html_entities(&caps[2]);
+            if is_mermaid_lang(lang) {
+                let escaped = escape_html_text(&code);
+                return format!(r#"<div class="md-mermaid"><pre class="mermaid">{escaped}</pre></div>"#);
+            }
+            let normalized = normalize_lang(lang);
+            let syntax = SYNTAX_SET
+                .find_syntax_by_token(&normalized)
+                .or_else(|| SYNTAX_SET.find_syntax_by_extension(&normalized))
+                .unwrap_or_else(|| SYNTAX_SET.find_syntax_plain_text());
+            match highlighted_html_for_string(&code, &SYNTAX_SET, syntax, &theme) {
+                Ok(highlighted) => format!(r#"<div class="md-code-block">{highlighted}</div>"#),
+                Err(_) => format!("<pre><code>{code}</code></pre>"),
+            }
+        })
+        .into_owned()
+}
+
+/// GFM テーブルをアプリプレビューと同じ `.md-table-wrap` で囲む。
+pub fn wrap_tables_in_html(html: &str) -> String {
+    if !html.contains("<table") || html.contains("md-table-wrap") {
+        return html.to_string();
+    }
+    RE_TABLE
+        .replace_all(html, |caps: &regex::Captures| {
+            let attrs = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            let body = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+            format!(r#"<div class="md-table-wrap"><table{attrs}>{body}</table></div>"#)
+        })
+        .into_owned()
+}
+
+/// 提示 viewer 向けにコードハイライト・Mermaid マークアップ・テーブルラップを適用する。
+pub fn finalize_viewer_html(html: &str) -> String {
+    wrap_tables_in_html(&highlight_code_blocks_in_html(html))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn block_callout_renders() {
+        let md = "before\n::: note warn\nline1\nline2\n:::\nafter";
+        let html = render_note_body_html(md);
+        assert!(html.contains("md-callout--warn"));
+        assert!(html.contains("md-callout__icon"));
+        assert!(!html.contains("md-callout__label"));
+        assert!(html.contains("line1"));
+        assert!(html.contains("before"));
+        assert!(html.contains("after"));
+    }
+
+    #[test]
+    fn single_line_callout_renders() {
+        let md = "note::tip hello world";
+        let html = render_note_body_html(md);
+        assert!(html.contains("md-callout--tip"));
+        assert!(html.contains("hello world"));
+    }
+
+    #[test]
+    fn multi_line_callout_renders() {
+        let md = "note::alert\nalert body\n::note";
+        let html = render_note_body_html(md);
+        assert!(html.contains("md-callout--alert"));
+        assert!(html.contains("alert body"));
+    }
+
+    #[test]
+    fn single_newlines_become_hard_breaks() {
+        let html = markdown_fragment_to_html("line one\nline two");
+        assert!(
+            html.contains("<br") || html.contains("<br/>") || html.contains("<br />"),
+            "expected br tag, got {html}"
+        );
+    }
+
+    #[test]
+    fn code_fence_preserves_newlines_without_extra_breaks() {
+        let md = "```\na\nb\n```";
+        let html = markdown_fragment_to_html(md);
+        assert!(html.contains("<code") || html.contains("<pre"));
+        assert!(html.contains("a\nb") || html.contains("a\r\nb") || (html.contains('a') && html.contains('b')));
+    }
+
+    #[test]
+    fn highlight_rust_code_block() {
+        let html = markdown_fragment_to_html("```rust\nfn main() {}\n```");
+        let highlighted = highlight_code_blocks_in_html(&html);
+        assert!(highlighted.contains("md-code-block"));
+        assert!(highlighted.contains("fn") && highlighted.contains("main"));
+    }
+
+    #[test]
+    fn gfm_table_renders() {
+        let md = "| A | B |\n|---|---|\n| 1 | 2 |";
+        let html = markdown_fragment_to_html(md);
+        assert!(html.contains("<table"));
+        assert!(html.contains("<th") || html.contains("<td"));
+    }
+
+    #[test]
+    fn gfm_task_list_renders_checkbox() {
+        let html = markdown_fragment_to_html("- [x] done\n- [ ] todo");
+        assert!(html.contains("checkbox"));
+    }
+
+    #[test]
+    fn gfm_footnote_renders() {
+        let html = markdown_fragment_to_html("Text[^note]\n\n[^note]: Footnote body");
+        assert!(
+            html.contains("footnote") || html.contains("Footnote body"),
+            "expected footnote html, got {html}"
+        );
+    }
+
+    #[test]
+    fn mermaid_fence_becomes_diagram_markup() {
+        let html = markdown_fragment_to_html("```mermaid\ngraph LR\n  A --> B\n```");
+        let highlighted = highlight_code_blocks_in_html(&html);
+        assert!(highlighted.contains("md-mermaid"));
+        assert!(highlighted.contains(r#"<pre class="mermaid">"#));
+        assert!(highlighted.contains("graph LR"));
+        assert!(!highlighted.contains("md-code-block"));
+    }
+
+    #[test]
+    fn wrap_tables_adds_scroll_container() {
+        let html = markdown_fragment_to_html("| A | B |\n|---|---|\n| 1 | 2 |");
+        let wrapped = wrap_tables_in_html(&html);
+        assert!(wrapped.contains("md-table-wrap"));
+        assert!(wrapped.contains("<table"));
+    }
+
+    #[test]
+    fn finalize_viewer_html_applies_table_and_mermaid() {
+        let md = "| X |\n|---|\n| 1 |\n\n```mermaid\ngraph TD\n  A --> B\n```";
+        let body = render_note_body_html(md);
+        let final_html = finalize_viewer_html(&body);
+        assert!(final_html.contains("md-table-wrap"));
+        assert!(final_html.contains("md-mermaid"));
+    }
+}
