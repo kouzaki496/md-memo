@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { Sidebar } from "@/components/app/Sidebar";
 import { CollapsedSidebarRail } from "@/components/app/CollapsedSidebarRail";
 import { SidebarProvider } from "@/contexts/SidebarContext";
@@ -35,7 +35,7 @@ function App() {
   const setIsEditModeRef = useRef<(value: boolean) => void>(() => {});
 
   const layout = useAppLayout();
-  const notesData = useNotesData(true);
+  const notesData = useNotesData(false);
 
   const navigation = useNoteNavigation({
     setStatus: notesData.setStatus,
@@ -99,6 +99,11 @@ function App() {
 
   leaveSettingsModeRef.current = settings.leaveSettingsMode;
   exitSettingsIfAllowedRef.current = settings.exitSettingsIfAllowed;
+
+  useEffect(() => {
+    if (!settings.notesInitEnabled) return;
+    void notesData.initializeNotes();
+  }, [settings.notesInitEnabled, notesData.initializeNotes]);
 
   const presentation = usePresentationSession({
     currentPath: navigation.currentPath,

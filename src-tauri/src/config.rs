@@ -117,6 +117,38 @@ pub fn resolve_notes_dir_path(app: &tauri::AppHandle, notes_dir: &str) -> Result
     }
 }
 
+fn documents_base_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let sample = resolve_notes_dir_path(app, &default_notes_dir())?;
+    sample
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| err(app_error::NOTES_DIR_RESOLVE_FAILED))
+}
+
+fn paths_equal(a: &Path, b: &Path) -> bool {
+    if a == b {
+        return true;
+    }
+    if let (Ok(a), Ok(b)) = (a.canonicalize(), b.canonicalize()) {
+        return a == b;
+    }
+    false
+}
+
+/// 「ドキュメント」フォルダ自体が指定された場合は `scriptax-notes` に正規化する。
+fn normalize_notes_dir(app: &tauri::AppHandle, cfg: &mut AppConfig) -> Result<(), String> {
+    cfg.notes_dir = cfg.notes_dir.trim().to_string();
+    if cfg.notes_dir.is_empty() {
+        return Ok(());
+    }
+    let resolved = resolve_notes_dir_path(app, &cfg.notes_dir)?;
+    let doc = documents_base_dir(app)?;
+    if paths_equal(&resolved, &doc) {
+        cfg.notes_dir = default_notes_dir();
+    }
+    Ok(())
+}
+
 pub fn get_config_path(app: &tauri::AppHandle) -> PathBuf {
     app.path()
         .resolve("config.json", BaseDirectory::AppLocalData)
@@ -125,22 +157,22 @@ pub fn get_config_path(app: &tauri::AppHandle) -> PathBuf {
 
 pub fn load_config(app: &tauri::AppHandle) -> AppConfig {
     let path = get_config_path(app);
-    if path.exists() {
+    let mut cfg = if path.exists() {
         let content = fs::read_to_string(&path).unwrap_or_default();
         if content.trim().is_empty() {
             AppConfig::default()
         } else {
-            let mut cfg = serde_json::from_str::<AppConfig>(&content).unwrap_or_default();
-            normalize_theme_mode(&mut cfg);
-            normalize_theme_preset(&mut cfg);
-            cfg
+            serde_json::from_str::<AppConfig>(&content).unwrap_or_default()
         }
     } else {
-        let mut cfg = AppConfig::default();
-        normalize_theme_mode(&mut cfg);
-        normalize_theme_preset(&mut cfg);
-        cfg
+        AppConfig::default()
+    };
+    normalize_theme_mode(&mut cfg);
+    normalize_theme_preset(&mut cfg);
+    if let Err(e) = normalize_notes_dir(app, &mut cfg) {
+        eprintln!("normalize_notes_dir: {e}");
     }
+    cfg
 }
 
 /// 初回起動時など、`config.json` が無ければ既定内容で作成する
@@ -202,7 +234,7 @@ pub fn save_config_file(app: &tauri::AppHandle, config: &AppConfig) -> Result<()
     if cfg.notes_dir.trim().is_empty() {
         return Err(err(app_error::NOTES_DIR_REQUIRED));
     }
-    cfg.notes_dir = cfg.notes_dir.trim().to_string();
+    normalize_notes_dir(app, &mut cfg)?;
     normalize_theme_mode(&mut cfg);
     normalize_theme_preset(&mut cfg);
     cfg.dark_mode_legacy = None;

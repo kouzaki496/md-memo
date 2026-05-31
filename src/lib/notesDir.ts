@@ -13,7 +13,8 @@ export async function resolveNotesDirPath(notesDir: string): Promise<string | nu
 }
 
 export async function pickNotesDirFolder(currentNotesDir: string): Promise<string | null> {
-  const defaultPath = currentNotesDir.trim() || undefined;
+  const resolvedDefault = await resolveNotesDirPath(currentNotesDir);
+  const defaultPath = resolvedDefault ?? (currentNotesDir.trim() || undefined);
   const selected = await open({
     directory: true,
     multiple: false,
