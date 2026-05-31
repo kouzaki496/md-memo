@@ -117,10 +117,13 @@ function App() {
     query,
     setQuery,
     searchResults,
+    searchMode,
+    searchError,
     status,
     setStatus,
     isManageMode,
     setIsManageMode,
+    closeManager,
     managerQuery,
     setManagerQuery,
     maxChars,
@@ -130,6 +133,8 @@ function App() {
     pinned,
     recent,
     filteredDetails,
+    managerSearchError,
+    managerSearchPending,
     loadNotes,
     loadNoteDetails,
     toggleSelect,
@@ -1013,11 +1018,13 @@ function App() {
               pinned={pinned}
               recent={recent}
               searchResults={searchResults}
+              searchMode={searchMode}
+              searchError={searchError}
               activeHit={activeHit}
               currentPath={currentPath}
               status={status}
               onCreateNew={createNew}
-              onOpenManager={() => {
+              onOpenManager={(options) => {
                 void (async () => {
                   if (!(await exitSettingsIfAllowed())) return;
                   if (isEditMode) {
@@ -1025,7 +1032,11 @@ function App() {
                     await releaseEditLock();
                     setIsEditMode(false);
                   }
-                  await openManager();
+                  await openManager(
+                    options?.withCurrentSearch
+                      ? { searchQuery: query, initialHits: searchResults }
+                      : undefined
+                  );
                 })();
               }}
               onOpenSettings={() => void openSettings()}
@@ -1119,10 +1130,12 @@ function App() {
             setMaxChars={setMaxChars}
             selectedCount={selectedPaths.size}
             filteredDetails={filteredDetails}
+            managerSearchError={managerSearchError}
+            managerSearchPending={managerSearchPending}
             selectedPaths={selectedPaths}
             onSelectAllFiltered={selectAllFiltered}
             onClearSelection={clearSelection}
-            onClose={() => setIsManageMode(false)}
+            onClose={closeManager}
             onDeleteSelected={() => void deleteSelected()}
             onToggleSelect={toggleSelect}
             onOpenNote={(path) => void openNote(path)}
@@ -1172,6 +1185,8 @@ function App() {
               onPresentationPreviewScroll={
                 currentPresentation?.active ? handlePresentationPreviewScroll : undefined
               }
+              searchQuery={query}
+              searchMode={searchMode}
               editorRef={editorRef}
             />
           </div>

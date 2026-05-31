@@ -14,6 +14,8 @@ type ManagerPanelProps = {
   setMaxChars: (v: string) => void;
   selectedCount: number;
   filteredDetails: NoteDetail[];
+  managerSearchError: boolean;
+  managerSearchPending: boolean;
   selectedPaths: Set<string>;
   onSelectAllFiltered: () => void;
   onClearSelection: () => void;
@@ -37,6 +39,8 @@ export function ManagerPanel(props: ManagerPanelProps) {
     setMaxChars,
     selectedCount,
     filteredDetails,
+    managerSearchError,
+    managerSearchPending,
     selectedPaths,
     onSelectAllFiltered,
     onClearSelection,
@@ -202,7 +206,19 @@ export function ManagerPanel(props: ManagerPanelProps) {
             );
           })}
           {filteredDetails.length === 0 && (
-            <div className="p-4 text-sm text-muted-foreground">{messages.manager.empty}</div>
+            <div
+              className={`p-4 text-sm ${
+                managerSearchError && managerQuery.trim()
+                  ? "text-destructive"
+                  : "text-muted-foreground"
+              }`}
+            >
+              {managerSearchError && managerQuery.trim()
+                ? messages.status.searchFailed
+                : managerSearchPending && managerQuery.trim()
+                  ? messages.manager.searchSearching
+                  : messages.manager.empty}
+            </div>
           )}
         </div>
       </ScrollArea>

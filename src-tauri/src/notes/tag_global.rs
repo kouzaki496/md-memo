@@ -3,6 +3,7 @@ use super::frontmatter::{
     normalize_inbox_exclusive_tags, note_frontmatter_regex, parse_tags_from_fm_inner,
     rebuild_note_frontmatter_tags, remove_tag_from_list, INBOX_TAG,
 };
+use super::search_cache::invalidate_search_cache;
 use super::store::resolve_notes_root;
 use super::types::ReplaceTagGloballyResult;
 use crate::app_error::{self, err, io};
@@ -103,6 +104,10 @@ pub fn replace_tag_globally(
         config::save_config_file(&app, &cfg)?;
     }
 
+    if !changed_paths.is_empty() {
+        invalidate_search_cache();
+    }
+
     Ok(ReplaceTagGloballyResult {
         files_changed: changed_paths.len(),
         changed_paths,
@@ -179,6 +184,10 @@ pub fn remove_tag_globally(app: tauri::AppHandle, tag: String) -> Result<Replace
         cfg.template_tags = dedupe_tags_case_insensitive(cfg.template_tags);
         cfg.template_tags = ensure_locked_inbox_first(cfg.template_tags);
         config::save_config_file(&app, &cfg)?;
+    }
+
+    if !changed_paths.is_empty() {
+        invalidate_search_cache();
     }
 
     Ok(ReplaceTagGloballyResult {

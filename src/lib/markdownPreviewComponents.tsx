@@ -1,6 +1,8 @@
+import type { ReactNode } from "react";
 import type { Components } from "react-markdown";
 import { MarkdownCodeBlock } from "@/components/app/MarkdownCodeBlock";
 import { MarkdownPreviewImage } from "@/components/app/MarkdownPreviewImage";
+import { highlightReactChildren } from "@/lib/searchHighlight";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 async function openLinkInSystemBrowser(href: string) {
@@ -21,7 +23,20 @@ function normalizeExternalBrowserHref(href: string): string | null {
   return null;
 }
 
-export function createMarkdownPreviewComponents(): Partial<Components> {
+type PreviewComponentsOptions = {
+  highlightTerms?: string[];
+};
+
+function wrapHighlightChildren(children: ReactNode, terms: string[] | undefined) {
+  if (!terms?.length) return children;
+  return highlightReactChildren(children, terms);
+}
+
+export function createMarkdownPreviewComponents(
+  options: PreviewComponentsOptions = {}
+): Partial<Components> {
+  const highlightTerms = options.highlightTerms ?? [];
+
   return {
     pre({ children }) {
       return <>{children}</>;
@@ -60,9 +75,53 @@ export function createMarkdownPreviewComponents(): Partial<Components> {
             if (url) void openLinkInSystemBrowser(url);
           }}
         >
-          {children}
+          {wrapHighlightChildren(children, highlightTerms)}
         </a>
       );
+    },
+    p({ children, ...props }) {
+      return <p {...props}>{wrapHighlightChildren(children, highlightTerms)}</p>;
+    },
+    li({ children, ...props }) {
+      return <li {...props}>{wrapHighlightChildren(children, highlightTerms)}</li>;
+    },
+    h1({ children, ...props }) {
+      return <h1 {...props}>{wrapHighlightChildren(children, highlightTerms)}</h1>;
+    },
+    h2({ children, ...props }) {
+      return <h2 {...props}>{wrapHighlightChildren(children, highlightTerms)}</h2>;
+    },
+    h3({ children, ...props }) {
+      return <h3 {...props}>{wrapHighlightChildren(children, highlightTerms)}</h3>;
+    },
+    h4({ children, ...props }) {
+      return <h4 {...props}>{wrapHighlightChildren(children, highlightTerms)}</h4>;
+    },
+    h5({ children, ...props }) {
+      return <h5 {...props}>{wrapHighlightChildren(children, highlightTerms)}</h5>;
+    },
+    h6({ children, ...props }) {
+      return <h6 {...props}>{wrapHighlightChildren(children, highlightTerms)}</h6>;
+    },
+    td({ children, ...props }) {
+      return <td {...props}>{wrapHighlightChildren(children, highlightTerms)}</td>;
+    },
+    th({ children, ...props }) {
+      return <th {...props}>{wrapHighlightChildren(children, highlightTerms)}</th>;
+    },
+    blockquote({ children, ...props }) {
+      return (
+        <blockquote {...props}>{wrapHighlightChildren(children, highlightTerms)}</blockquote>
+      );
+    },
+    strong({ children, ...props }) {
+      return <strong {...props}>{wrapHighlightChildren(children, highlightTerms)}</strong>;
+    },
+    em({ children, ...props }) {
+      return <em {...props}>{wrapHighlightChildren(children, highlightTerms)}</em>;
+    },
+    del({ children, ...props }) {
+      return <del {...props}>{wrapHighlightChildren(children, highlightTerms)}</del>;
     },
   };
 }

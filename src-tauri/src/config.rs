@@ -1,6 +1,7 @@
 //! アプリ設定（`AppLocalData/config.json`）
 
 use crate::app_error::{self, io, err};
+use crate::notes::search::invalidate_search_cache;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fs;
@@ -196,6 +197,7 @@ pub fn save_config(app: tauri::AppHandle, config: AppConfig) -> Result<(), Strin
 }
 
 pub fn save_config_file(app: &tauri::AppHandle, config: &AppConfig) -> Result<(), String> {
+    let previous = load_config(app);
     let mut cfg = config.clone();
     if cfg.notes_dir.trim().is_empty() {
         return Err(err(app_error::NOTES_DIR_REQUIRED));
@@ -209,5 +211,9 @@ pub fn save_config_file(app: &tauri::AppHandle, config: &AppConfig) -> Result<()
         fs::create_dir_all(parent).map_err(|e| io(app_error::CONFIG_SAVE_FAILED, e))?;
     }
     let content = serde_json::to_string_pretty(&cfg).map_err(|e| io(app_error::CONFIG_SAVE_FAILED, e))?;
-    fs::write(path, content).map_err(|e| io(app_error::CONFIG_SAVE_FAILED, e))
+    fs::write(path, content).map_err(|e| io(app_error::CONFIG_SAVE_FAILED, e))?;
+    if previous.notes_dir.trim() != cfg.notes_dir {
+        invalidate_search_cache();
+    }
+    Ok(())
 }

@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { NoteDetail, NoteMeta, SearchHit } from "@/types/note";
+import type { NoteDetail, NoteMeta } from "@/types/note";
 import { buildShortcutMemoContent } from "@/config/shortcutMemo";
 import { compareNoteRecency } from "@/lib/noteRecency";
 import { isSystemNoteFileName, isSystemNotePath } from "@/lib/systemNotes";
 import { formatAppError } from "@/lib/appError";
 import { messages } from "@/lib/messages";
+import { useNoteSearch } from "@/hooks/useNoteSearch";
+import { noteDetailsFromSearchHits } from "@/lib/managerSearchFilter";
+import type { SearchHit } from "@/types/note";
 
 function isEditorShortcutsNote(n: NoteMeta): boolean {
   return isSystemNoteFileName(n.title);
@@ -14,14 +17,58 @@ function isEditorShortcutsNote(n: NoteMeta): boolean {
 export function useNotesData(notesInitEnabled: boolean) {
   const [query, setQuery] = useState("");
   const [notes, setNotes] = useState<NoteMeta[]>([]);
-  const [searchResults, setSearchResults] = useState<SearchHit[]>([]);
   const [status, setStatus] = useState<string>(messages.status.ready);
   const [isManageMode, setIsManageMode] = useState(false);
   const [noteDetails, setNoteDetails] = useState<NoteDetail[]>([]);
   const [managerQuery, setManagerQuery] = useState("");
-  const [managerSearchPaths, setManagerSearchPaths] = useState<Set<string> | null>(null);
+  const [managerSeedQuery, setManagerSeedQuery] = useState("");
+  const [managerSeedHits, setManagerSeedHits] = useState<SearchHit[] | null>(null);
   const [maxChars, setMaxChars] = useState("");
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+
+  const handleSearchError = useCallback(() => {
+    setStatus(messages.status.searchFailed);
+  }, []);
+
+  const sidebarSearch = useNoteSearch(query, { onError: handleSearchError });
+  const [managerDetailsReady, setManagerDetailsReady] = useState(false);
+
+  const managerSearch = useNoteSearch(managerQuery, {
+    onError: handleSearchError,
+    enabled: isManageMode && managerDetailsReady,
+  });
+
+  const managerActiveHits = useMemo((): SearchHit[] | null | undefined => {
+    const q = managerQuery.trim();
+    if (q.length === 0) return null;
+    if (managerSearch.error) return undefined;
+
+    if (!managerSearch.pending && managerSearch.searchedQuery === q) {
+      return managerSearch.hits;
+    }
+    if (managerSeedQuery === q && managerSeedHits) {
+      return managerSeedHits;
+    }
+    return undefined;
+  }, [managerQuery, managerSearch, managerSeedQuery, managerSeedHits]);
+
+  const managerSearchPending = useMemo(() => {
+    const q = managerQuery.trim();
+    return q.length > 0 && !managerSearch.error && managerActiveHits === undefined;
+  }, [managerQuery, managerSearch.error, managerActiveHits]);
+
+  useEffect(() => {
+    const q = managerQuery.trim();
+    if (
+      managerSeedHits &&
+      !managerSearch.pending &&
+      !managerSearch.error &&
+      managerSearch.searchedQuery === q
+    ) {
+      setManagerSeedHits(null);
+      setManagerSeedQuery("");
+    }
+  }, [managerQuery, managerSearch, managerSeedHits]);
 
   const pinned = useMemo(
     () => notes.filter((n) => n.pinned).sort(compareNoteRecency),
@@ -35,14 +82,23 @@ export function useNotesData(notesInitEnabled: boolean) {
   const filteredDetails = useMemo(() => {
     const q = managerQuery.trim();
     const max = Number(maxChars);
-    return noteDetails.filter((n) => {
-      const queryOk =
-        q.length === 0 ||
-        (managerSearchPaths !== null && managerSearchPaths.has(n.path));
+    let rows: NoteDetail[];
+
+    if (q.length === 0) {
+      rows = noteDetails;
+    } else if (managerActiveHits === undefined) {
+      rows = [];
+    } else if (managerActiveHits === null) {
+      rows = noteDetails;
+    } else {
+      rows = noteDetailsFromSearchHits(noteDetails, notes, managerActiveHits);
+    }
+
+    return rows.filter((n) => {
       const lengthOk = !Number.isFinite(max) || max <= 0 || n.charCount <= max;
-      return queryOk && lengthOk;
+      return lengthOk;
     });
-  }, [noteDetails, managerQuery, maxChars, managerSearchPaths]);
+  }, [noteDetails, notes, managerQuery, maxChars, managerActiveHits]);
 
   const loadNotes = async () => {
     const list = await invoke<NoteMeta[]>("list_notes");
@@ -95,9 +151,37 @@ export function useNotesData(notesInitEnabled: boolean) {
     return deleted;
   };
 
-  const openManager = async () => {
-    setIsManageMode(true);
-    await loadNoteDetails();
+  const closeManager = useCallback(() => {
+    setIsManageMode(false);
+    setManagerQuery("");
+    setManagerSeedQuery("");
+    setManagerSeedHits(null);
+    setManagerDetailsReady(false);
+  }, []);
+
+  const openManager = async (options?: { searchQuery?: string; initialHits?: SearchHit[] }) => {
+    setManagerDetailsReady(false);
+    if (options?.searchQuery !== undefined) {
+      const q = options.searchQuery.trim();
+      setManagerQuery(options.searchQuery);
+      if (options.initialHits && q.length > 0) {
+        setManagerSeedQuery(q);
+        setManagerSeedHits(options.initialHits);
+      } else {
+        setManagerSeedQuery("");
+        setManagerSeedHits(null);
+      }
+    } else {
+      setManagerQuery("");
+      setManagerSeedQuery("");
+      setManagerSeedHits(null);
+    }
+    try {
+      await loadNoteDetails();
+    } finally {
+      setManagerDetailsReady(true);
+      setIsManageMode(true);
+    }
   };
 
   const ensureShortcutMemo = async () => {
@@ -147,62 +231,20 @@ export function useNotesData(notesInitEnabled: boolean) {
     void initializeNotes();
   }, [notesInitEnabled, initializeNotes]);
 
-  useEffect(() => {
-    const q = query.trim();
-    if (!q) {
-      setSearchResults([]);
-      return;
-    }
-    let cancelled = false;
-    void invoke<SearchHit[]>("search_notes", { query: q })
-      .then((hits) => {
-        if (!cancelled) setSearchResults(hits);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        console.error(err);
-        setSearchResults([]);
-        setStatus(formatAppError(err));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [query]);
-
-  useEffect(() => {
-    const q = managerQuery.trim();
-    if (!q) {
-      setManagerSearchPaths(null);
-      return;
-    }
-    let cancelled = false;
-    setManagerSearchPaths(new Set());
-    void invoke<SearchHit[]>("search_notes", { query: q })
-      .then((hits) => {
-        if (!cancelled) {
-          setManagerSearchPaths(new Set(hits.map((h) => h.path)));
-        }
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        console.error(err);
-        setManagerSearchPaths(new Set());
-        setStatus(formatAppError(err));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [managerQuery]);
-
   return {
     query,
     setQuery,
     notes,
-    searchResults,
+    searchResults: sidebarSearch.hits,
+    searchMode: sidebarSearch.mode,
+    searchError: sidebarSearch.error,
+    managerSearchError: managerSearch.error,
+    managerSearchPending,
     status,
     setStatus,
     isManageMode,
     setIsManageMode,
+    closeManager,
     noteDetails,
     managerQuery,
     setManagerQuery,

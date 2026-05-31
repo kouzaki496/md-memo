@@ -5,11 +5,14 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import type { PresentationStatus } from "@/types/presentation";
-import type { NoteMeta, SearchHit } from "@/types/note";
+import type { NoteMeta, SearchHit, SearchMode } from "@/types/note";
+import { isLineSearchHit, isMixedSearchMode, isTagSearchHit, isTagSearchMode } from "@/types/note";
 import { INBOX_EXCLUSIVE_MESSAGE } from "@/lib/noteTags";
 import { messages } from "@/lib/messages";
-import { isTagSearchQuery } from "@/lib/tagSearch";
 import { cn } from "@/lib/utils";
+
+/** サイドバー検索結果のプレビュー件数。超過分は一覧管理へ誘導する。 */
+const SIDEBAR_SEARCH_PREVIEW_LIMIT = 8;
 
 type SidebarProps = {
   query: string;
@@ -17,11 +20,13 @@ type SidebarProps = {
   pinned: NoteMeta[];
   recent: NoteMeta[];
   searchResults: SearchHit[];
+  searchMode: SearchMode;
+  searchError: boolean;
   activeHit: SearchHit | null;
   currentPath: string | null;
   status: string;
   onCreateNew: () => void;
-  onOpenManager: () => void;
+  onOpenManager: (options?: { withCurrentSearch?: boolean }) => void;
   onOpenSettings: () => void;
   onOpenNote: (path: string, hit?: SearchHit) => void;
   onOpenContextMenu: (e: MouseEvent, note: NoteMeta) => void;
@@ -43,6 +48,8 @@ export function Sidebar(props: SidebarProps) {
     pinned,
     recent,
     searchResults,
+    searchMode,
+    searchError,
     activeHit,
     currentPath,
     status,
@@ -62,7 +69,13 @@ export function Sidebar(props: SidebarProps) {
     onReopenPresentationTab,
   } = props;
   const isSearching = query.trim().length > 0;
-  const isTagSearch = isTagSearchQuery(query);
+  const isTagSearch = isTagSearchMode(searchMode);
+  const isMixedSearch = isMixedSearchMode(searchMode);
+  const searchResultsTitle = isTagSearch
+    ? messages.sidebar.searchResultsTags
+    : isMixedSearch
+      ? messages.sidebar.searchResultsMixed
+      : messages.sidebar.searchResults;
   const [isRecentOpen, setIsRecentOpen] = useState(true);
   const prevIsSearchingRef = useRef(false);
 
@@ -124,7 +137,7 @@ export function Sidebar(props: SidebarProps) {
           <Plus className="w-4 h-4" /> {messages.sidebar.newMemo}
         </Button>
         <Button
-          onClick={onOpenManager}
+          onClick={() => onOpenManager()}
           variant="outline"
           className="w-full justify-start gap-2 rounded-md border border-border bg-background shadow-sm hover:bg-muted/80"
           title="メモ一覧の管理・一括操作"
@@ -234,19 +247,21 @@ export function Sidebar(props: SidebarProps) {
               <Separator />
               <div>
                 <h4 className="mb-2 px-2 text-xs font-semibold tracking-tight text-muted-foreground flex items-center justify-between">
-                  <span>{isTagSearch ? messages.sidebar.searchResultsTags : messages.sidebar.searchResults}</span>
+                  <span>{searchResultsTitle}</span>
                   {searchResults.length > 0 && (
                     <span className="rounded bg-muted px-1.5 py-0.5 text-[10px]">{searchResults.length}</span>
                   )}
                 </h4>
                 {searchResults.length > 0 ? (
                   <div className="grid gap-1">
-                    {searchResults.slice(0, 8).map((r) => {
+                    {searchResults.slice(0, SIDEBAR_SEARCH_PREVIEW_LIMIT).map((r) => {
                       const fileName = r.path.split(/[/\\]/).pop() ?? r.path;
-                      const label = isTagSearch
+                      const tagHit = isTagSearchHit(r);
+                      const lineHit = isLineSearchHit(r);
+                      const label = tagHit
                         ? messages.sidebar.tagHit(fileName, r.text)
                         : messages.sidebar.lineHit(r.line, r.text);
-                      const isActive = isTagSearch
+                      const isActive = tagHit
                         ? currentPath === r.path
                         : Boolean(
                             activeHit &&
@@ -263,7 +278,7 @@ export function Sidebar(props: SidebarProps) {
                               ? "bg-muted text-foreground shadow-sm"
                               : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                           }`}
-                          onClick={() => onOpenNote(r.path, isTagSearch ? undefined : r)}
+                          onClick={() => onOpenNote(r.path, lineHit ? r : undefined)}
                           onContextMenu={(e) => onOpenContextMenuForPath(e, r.path)}
                           title={label}
                         >
@@ -271,7 +286,20 @@ export function Sidebar(props: SidebarProps) {
                         </button>
                       );
                     })}
+                    {searchResults.length > SIDEBAR_SEARCH_PREVIEW_LIMIT && (
+                      <button
+                        type="button"
+                        className="px-2 py-1.5 text-left text-xs text-primary hover:underline"
+                        onClick={() => onOpenManager({ withCurrentSearch: true })}
+                      >
+                        {messages.sidebar.searchViewInManager(
+                          searchResults.length - SIDEBAR_SEARCH_PREVIEW_LIMIT
+                        )}
+                      </button>
+                    )}
                   </div>
+                ) : searchError ? (
+                  <div className="px-2 py-1 text-xs text-destructive">{messages.status.searchFailed}</div>
                 ) : (
                   <div className="px-2 py-1 text-xs text-muted-foreground">{messages.sidebar.searchNoResults}</div>
                 )}

@@ -104,8 +104,12 @@ export const messages = {
     newMemo: "新規メモ",
     manager: "一覧管理",
     settings: "設定",
-    searchPlaceholder: "メモを検索…（#タグ でタグ検索）",
+    searchPlaceholder: "メモを検索…（#タグ / #タグ 語 でタグ+本文）",
     searchNoResults: "一致するメモはありません",
+    searchViewInManager: (remaining: number) =>
+      remaining > 0
+        ? `他 ${remaining} 件 — 一覧管理で見る`
+        : "一覧管理で見る",
     tagHit: (fileName: string, tags: string) => `${fileName} — ${tags}`,
     pinned: "ピン留め",
     recent: "最近",
@@ -113,6 +117,7 @@ export const messages = {
     recentExpand: "最近を展開",
     searchResults: "検索結果",
     searchResultsTags: "タグ検索結果",
+    searchResultsMixed: "タグ+本文検索結果",
     empty: "なし",
     presenting: "ブラウザ提示中",
     presentingOpenTab: "ブラウザで表示",
@@ -179,13 +184,14 @@ export const messages = {
 
   manager: {
     title: "メモ一覧管理",
-    searchPlaceholder: "タイトル・内容で検索（#タグ でタグ検索）",
+    searchPlaceholder: "本文で検索（#タグ / #タグ 語 でタグ+本文）",
     maxCharsPlaceholder: "最大文字数（例: 100）",
     selectAll: "表示中を全選択",
     clearSelection: "選択解除",
     close: "閉じる",
     deleteSelected: (n: number) => `選択を削除 (${n})`,
     empty: "条件に一致するメモはありません",
+    searchSearching: "検索中…",
     charCount: (n: number) => `${n} 文字`,
     emptyPreview: "（空のメモ）",
   },

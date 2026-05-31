@@ -1,30 +1,14 @@
 import { useMemo } from "react";
+import type { SearchMode } from "@/types/note";
+import {
+  isSearchHighlightActive,
+  parseBodyHighlightTerms,
+} from "@/lib/searchHighlight";
 
-export function useSearchHighlight(query: string, isEditMode: boolean) {
-  const searchTerms = useMemo(() => {
-    const terms = query
-      .split(/\s+/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-    return Array.from(new Set(terms));
-  }, [query]);
-
-  const highlightMatches = (line: string) => {
-    if (isEditMode) return line || " ";
-    if (searchTerms.length === 0) return line || " ";
-    const escaped = searchTerms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-    const re = new RegExp(`(${escaped.join("|")})`, "gi");
-    const parts = line.split(re);
-    return parts.map((part, i) => {
-      const hit = searchTerms.some((t) => part.toLowerCase() === t.toLowerCase());
-      if (!hit) return <span key={`txt-${i}`}>{part || (i === 0 && line === "" ? " " : "")}</span>;
-      return (
-        <mark key={`hit-${i}`} className="rounded bg-amber-200/80 px-0.5 text-foreground dark:bg-amber-500/40">
-          {part}
-        </mark>
-      );
-    });
-  };
-
-  return { searchTerms, highlightMatches };
+/** プレビュー用の本文ハイライト語（タグ検索時は空） */
+export function useSearchHighlightTerms(query: string, searchMode: SearchMode): string[] {
+  return useMemo(() => {
+    if (!isSearchHighlightActive(searchMode, query)) return [];
+    return parseBodyHighlightTerms(query);
+  }, [query, searchMode]);
 }

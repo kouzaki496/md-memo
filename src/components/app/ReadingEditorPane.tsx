@@ -43,6 +43,8 @@ import {
 import { isBuiltinReservedTagName } from "@/lib/reservedTags";
 import { messages } from "@/lib/messages";
 import { createMarkdownPreviewComponents } from "@/lib/markdownPreviewComponents";
+import type { SearchMode } from "@/types/note";
+import { useSearchHighlightTerms } from "@/hooks/useSearchHighlight";
 import {
   buildImageMarkdown,
   clipboardMayContainImage,
@@ -59,7 +61,6 @@ const toolbarBtn =
   "rounded-md border border-border bg-background shadow-sm hover:bg-muted/80 hover:text-foreground";
 
 const remarkPreviewPlugins = [remarkGfm, remarkBreaks];
-const markdownPreviewComponents = createMarkdownPreviewComponents();
 
 const TAGS_BAR_EXPANDED_KEY = "scriptax-editor-tags-bar-expanded";
 
@@ -105,6 +106,8 @@ type ReadingEditorPaneProps = {
   /** 提示中にプレビューのスクロール比率を viewer へ送る */
   onPresentationPreviewScroll?: (ratio: number) => void;
   editorRef: RefObject<HTMLTextAreaElement | null>;
+  searchQuery?: string;
+  searchMode?: SearchMode;
 };
 
 type CalloutKind = "info" | "warn" | "alert" | "tip";
@@ -393,7 +396,15 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
     onPresentInBrowser,
     onPresentationPreviewScroll,
     editorRef,
+    searchQuery = "",
+    searchMode = "body",
   } = props;
+
+  const highlightTerms = useSearchHighlightTerms(searchQuery, searchMode);
+  const markdownPreviewComponents = useMemo(
+    () => createMarkdownPreviewComponents({ highlightTerms }),
+    [highlightTerms]
+  );
 
   const previewMarkdown = useMemo(() => getMarkdownBody(input), [input]);
   const editorLineCount = useMemo(() => Math.max(1, input.split("\n").length), [input]);

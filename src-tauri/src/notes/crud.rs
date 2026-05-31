@@ -1,4 +1,5 @@
 use super::frontmatter::parse_tags_from_content;
+use super::search_cache::{invalidate_search_cache, invalidate_search_cache_file};
 use super::store::{
     collect_markdown_paths, file_timestamps_ms, resolve_notes_root, sort_paths_by_recency,
 };
@@ -103,6 +104,8 @@ pub fn delete_note(app: tauri::AppHandle, path: String) -> Result<(), String> {
     }
     fs::remove_file(&path).map_err(|e| io(app_error::FILE_DELETE_FAILED, e))?;
 
+    invalidate_search_cache_file(p.as_path());
+
     let mut cfg = config::load_config(&app);
     cfg.pinned_paths.retain(|p| p != &path);
     config::save_config_file(&app, &cfg)?;
@@ -131,6 +134,9 @@ pub fn delete_notes(app: tauri::AppHandle, paths: Vec<String>) -> Result<usize, 
     cfg.pinned_paths
         .retain(|p| !deletable_paths.iter().any(|x| x.as_str() == p));
     config::save_config_file(&app, &cfg)?;
+    if deleted > 0 {
+        invalidate_search_cache();
+    }
     Ok(deleted)
 }
 
@@ -185,6 +191,8 @@ pub fn save_note(
     };
 
     fs::write(&target_path, content).map_err(|e| io(app_error::FILE_WRITE_FAILED, e))?;
+
+    invalidate_search_cache_file(&target_path);
 
     Ok(target_path.to_string_lossy().into_owned())
 }
