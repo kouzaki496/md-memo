@@ -1,0 +1,20 @@
+/**
+ * ブラウザ viewer 向け default テーマ（preset なし）の最小トークン。
+ * App の :root / .dark と同値の --background 等 4 変数 + color-scheme。
+ */
+
+:root {
+  --background: oklch(0.988 0.006 250);
+  --foreground: oklch(0.24 0.018 255);
+  --muted-foreground: oklch(0.52 0.025 255);
+  --border: oklch(0.88 0.014 248);
+  color-scheme: light;
+}
+
+html.dark {
+  --background: oklch(0.21 0.018 260);
+  --foreground: oklch(0.94 0.012 255);
+  --muted-foreground: oklch(0.79 0.018 255);
+  --border: oklch(0.4 0.024 252);
+  color-scheme: dark;
+}

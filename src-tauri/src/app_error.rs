@@ -44,6 +44,7 @@ pub const ATTACHMENT_NOT_FOUND: &str = "attachment_not_found";
 pub const ATTACHMENT_READ_FAILED: &str = "attachment_read_failed";
 
 pub const INTERNAL_LOCK_FAILED: &str = "internal_lock_failed";
+pub const SEARCH_TASK_FAILED: &str = "search_task_failed";
 
 pub fn err(code: &'static str) -> String {
     code.to_string()

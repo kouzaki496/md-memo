@@ -267,6 +267,24 @@ pub fn render_note_body_html(body: &str) -> String {
     }
 }
 
+pub(crate) fn normalize_callout_kind(raw: Option<&str>) -> &'static str {
+    CalloutKind::from_str(raw).css_class()
+}
+
+pub(crate) fn split_preview_segments_contract(
+    markdown: &str,
+) -> Vec<(String, Option<String>, String)> {
+    split_preview_segments(markdown)
+        .into_iter()
+        .map(|segment| match segment {
+            PreviewSegment::Markdown(content) => ("markdown".to_string(), None, content),
+            PreviewSegment::Callout { kind, content } => {
+                ("callout".to_string(), Some(kind.css_class().to_string()), content)
+            }
+        })
+        .collect()
+}
+
 fn decode_html_entities(text: &str) -> String {
     text.replace("&amp;", "&")
         .replace("&lt;", "<")

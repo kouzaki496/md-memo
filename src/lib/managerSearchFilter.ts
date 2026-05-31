@@ -60,7 +60,7 @@ function findInList<T extends { path: string }>(items: T[], hitPath: string): T 
 }
 
 /** 検索ヒット path に対応する NoteDetail を探す（detail → meta → ヒットから合成） */
-export function findNoteDetailForHit(
+function findNoteDetailForHit(
   noteDetails: NoteDetail[],
   notes: NoteMeta[],
   hitPath: string,
@@ -77,7 +77,7 @@ export function findNoteDetailForHit(
 }
 
 /** あいまいヒットした path（ヒット path と解決後 detail path の両方） */
-export function fuzzyPathsFromSearchHits(
+function fuzzyPathsFromSearchHits(
   noteDetails: NoteDetail[],
   notes: NoteMeta[],
   hits: SearchHit[]

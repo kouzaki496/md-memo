@@ -31,10 +31,6 @@ export function resolveNoteWindowPathSync(): string | null {
   return getNotePathFromHash() ?? getNotePathFromUrl();
 }
 
-export function isNoteWindowMode(): boolean {
-  return resolveNoteWindowPathSync() != null;
-}
-
 export async function openNoteInNewWindow(path: string): Promise<void> {
   if (!isTauri()) {
     throw new Error("Tauri アプリ内でのみ利用できます");

@@ -1,0 +1,187 @@
+{
+  "version": 1,
+  "description": "FE (TypeScript) と BE (Rust) の検索ロジック共有契約。定数・パース・fuzzy マッチの正とする。",
+  "constants": {
+    "minFuzzyTermLen": 3,
+    "minFuzzyScore": 0.75,
+    "maxEditRatio": 0.34
+  },
+  "bodyHighlightTerms": [
+    {
+      "id": "tag-exclusion",
+      "query": "#work meetng",
+      "terms": [{ "text": "meetng", "exact": false }]
+    },
+    {
+      "id": "quoted-phrase",
+      "query": "\"hello world\"",
+      "terms": [{ "text": "hello world", "exact": true }]
+    },
+    {
+      "id": "mixed-tag-quote-fuzzy",
+      "query": "#work \"weekly report\" meetng",
+      "terms": [
+        { "text": "weekly report", "exact": true },
+        { "text": "meetng", "exact": false }
+      ]
+    },
+    {
+      "id": "unclosed-quote",
+      "query": "\"hello world",
+      "terms": [{ "text": "hello world", "exact": true }]
+    },
+    {
+      "id": "empty-quote",
+      "query": "\"\"",
+      "terms": []
+    },
+    {
+      "id": "quoted-hash",
+      "query": "\"#work\"",
+      "terms": [{ "text": "#work", "exact": true }]
+    },
+    {
+      "id": "whitespace-only",
+      "query": "   ",
+      "terms": []
+    }
+  ],
+  "rawTerms": [
+    {
+      "id": "mixed-tag-quote-fuzzy",
+      "query": "#work \"weekly report\" meetng",
+      "forceAllExact": false,
+      "terms": [
+        { "kind": "tag", "text": "work" },
+        { "kind": "body", "text": "weekly report", "exact": true },
+        { "kind": "body", "text": "meetng", "exact": false }
+      ]
+    },
+    {
+      "id": "unclosed-quote",
+      "query": "\"hello world",
+      "forceAllExact": false,
+      "terms": [{ "kind": "body", "text": "hello world", "exact": true }]
+    },
+    {
+      "id": "empty-quote",
+      "query": "\"\"",
+      "forceAllExact": false,
+      "terms": []
+    },
+    {
+      "id": "quoted-hash",
+      "query": "\"#work\"",
+      "forceAllExact": false,
+      "terms": [{ "kind": "body", "text": "#work", "exact": true }]
+    },
+    {
+      "id": "tag-only",
+      "query": "#work",
+      "forceAllExact": false,
+      "terms": [{ "kind": "tag", "text": "work" }]
+    }
+  ],
+  "fuzzyLineMatch": [
+    {
+      "id": "typo-meetng",
+      "line": "weekly meeting notes",
+      "term": "meetng",
+      "matches": true
+    },
+    {
+      "id": "typo-meetngs-reject",
+      "line": "weekly meeting notes",
+      "term": "meetngs",
+      "matches": false
+    },
+    {
+      "id": "short-term-exact-substring",
+      "line": "go to it",
+      "term": "it",
+      "matches": true
+    },
+    {
+      "id": "short-term-no-match",
+      "line": "go to at",
+      "term": "it",
+      "matches": false
+    },
+    {
+      "id": "uppercase-term-exact-only",
+      "line": "Hello World",
+      "term": "Hello",
+      "matches": true
+    },
+    {
+      "id": "uppercase-term-no-fuzzy-on-lowercase-line",
+      "line": "hello world",
+      "term": "Hello",
+      "matches": false
+    },
+    {
+      "id": "uppercase-term-skips-fuzzy-highlight",
+      "line": "hello world",
+      "term": "Hello",
+      "matches": false
+    }
+  ],
+  "fuzzyHighlightRanges": [
+    {
+      "id": "typo-meetng-range",
+      "text": "weekly meeting notes",
+      "term": "meetng",
+      "ranges": [{ "start": 7, "end": 14 }]
+    },
+    {
+      "id": "typo-meetngs-no-range",
+      "text": "weekly meeting notes",
+      "term": "meetngs",
+      "ranges": []
+    },
+    {
+      "id": "short-term-exact-substring-range",
+      "text": "go to it",
+      "term": "it",
+      "ranges": [{ "start": 6, "end": 8 }]
+    },
+    {
+      "id": "uppercase-term-no-range",
+      "text": "hello world",
+      "term": "Hello",
+      "ranges": []
+    },
+    {
+      "id": "uppercase-term-exact-substring-range",
+      "text": "Hello World",
+      "term": "Hello",
+      "ranges": [{ "start": 0, "end": 5 }]
+    }
+  ],
+  "fuzzyScores": [
+    {
+      "id": "exact-meeting",
+      "line": "team meeting",
+      "term": "meeting",
+      "score": 1.0
+    },
+    {
+      "id": "typo-meetng",
+      "line": "team meeting",
+      "term": "meetng",
+      "scoreMin": 0.75,
+      "scoreMax": 0.99
+    }
+  ],
+  "splitWords": [
+    {
+      "id": "separators",
+      "text": "weekly meeting-notes",
+      "words": [
+        { "word": "weekly", "start": 0, "end": 6 },
+        { "word": "meeting", "start": 7, "end": 14 },
+        { "word": "notes", "start": 15, "end": 20 }
+      ]
+    }
+  ]
+}

@@ -1,76 +1,52 @@
-import { type MouseEvent, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Clock, ExternalLink, List, Lock, Monitor, PanelLeftClose, Pin, Plus, Search, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import type { PresentationStatus } from "@/types/presentation";
-import type { NoteMeta, SearchHit, SearchMode } from "@/types/note";
 import { isLineSearchHit, isMixedSearchMode, isFuzzySearchHit, isTagSearchHit, isTagSearchMode } from "@/types/note";
 import { SearchFuzzyBadge } from "@/components/app/SearchMatchHint";
+import { useSidebarContext } from "@/contexts/SidebarContext";
 import { INBOX_EXCLUSIVE_MESSAGE } from "@/lib/noteTags";
+import { fileNameFromPath } from "@/lib/notePath";
 import { messages } from "@/lib/messages";
 import { cn } from "@/lib/utils";
 
 /** サイドバー検索結果のプレビュー件数。超過分は一覧管理へ誘導する。 */
 const SIDEBAR_SEARCH_PREVIEW_LIMIT = 8;
 
-type SidebarProps = {
-  query: string;
-  setQuery: (v: string) => void;
-  pinned: NoteMeta[];
-  recent: NoteMeta[];
-  searchResults: SearchHit[];
-  searchMode: SearchMode;
-  searchError: boolean;
-  searchPending: boolean;
-  activeHit: SearchHit | null;
-  currentPath: string | null;
-  status: string;
-  onCreateNew: () => void;
-  onOpenManager: (options?: { withCurrentSearch?: boolean }) => void;
-  onOpenSettings: () => void;
-  onOpenNote: (path: string, hit?: SearchHit) => void;
-  onOpenContextMenu: (e: MouseEvent, note: NoteMeta) => void;
-  onOpenContextMenuForPath: (e: MouseEvent, path: string) => void;
-  onOpenHoverPreview: (e: MouseEvent, note: NoteMeta) => void;
-  onMoveHoverPreview: (e: MouseEvent) => void;
-  onCloseHoverPreview: () => void;
-  onCloseSidebar: () => void;
-  activePresentations: PresentationStatus[];
-  presentedPaths: Set<string>;
-  onOpenPresentedNote: (path: string) => void;
-  onReopenPresentationTab: (presentation: PresentationStatus) => void;
-};
-
-export function Sidebar(props: SidebarProps) {
+export function Sidebar() {
+  const { search, notes, presentation, actions, interactions, status } = useSidebarContext();
   const {
     query,
     setQuery,
-    pinned,
-    recent,
-    searchResults,
-    searchMode,
-    searchError,
-    searchPending,
+    results: searchResults,
+    mode: searchMode,
+    error: searchError,
+    pending: searchPending,
     activeHit,
-    currentPath,
-    status,
-    onCreateNew,
-    onOpenManager,
-    onOpenSettings,
-    onOpenNote,
-    onOpenContextMenu,
-    onOpenContextMenuForPath,
-    onOpenHoverPreview,
-    onMoveHoverPreview,
-    onCloseHoverPreview,
-    onCloseSidebar,
+  } = search;
+  const { pinned, recent, currentPath } = notes;
+  const {
     activePresentations,
     presentedPaths,
-    onOpenPresentedNote,
-    onReopenPresentationTab,
-  } = props;
+    openPresentedNote,
+    reopenPresentationTab,
+  } = presentation;
+  const {
+    createNew: onCreateNew,
+    openManager: onOpenManager,
+    openSettings: onOpenSettings,
+    openNote: onOpenNote,
+    closeSidebar: onCloseSidebar,
+  } = actions;
+  const {
+    openContextMenu: onOpenContextMenu,
+    openContextMenuForPath: onOpenContextMenuForPath,
+    openHoverPreview: onOpenHoverPreview,
+    moveHoverPreview: onMoveHoverPreview,
+    closeHoverPreview: onCloseHoverPreview,
+  } = interactions;
   const isSearching = query.trim().length > 0;
   const isTagSearch = isTagSearchMode(searchMode);
   const isMixedSearch = isMixedSearchMode(searchMode);
@@ -121,9 +97,8 @@ export function Sidebar(props: SidebarProps) {
         <div className="flex items-center justify-between">
           <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{messages.sidebar.appName}</div>
           <Button
-            variant="outline"
+            variant="toolbar"
             size="icon-sm"
-            className="rounded-md border border-border bg-background shadow-sm hover:bg-muted/80"
             onClick={onCloseSidebar}
             title="サイドバーを閉じる"
             aria-label="サイドバーを閉じる"
@@ -141,16 +116,16 @@ export function Sidebar(props: SidebarProps) {
         </Button>
         <Button
           onClick={() => onOpenManager()}
-          variant="outline"
-          className="w-full justify-start gap-2 rounded-md border border-border bg-background shadow-sm hover:bg-muted/80"
+          variant="toolbar"
+          className="w-full justify-start gap-2"
           title="メモ一覧の管理・一括操作"
         >
           <List className="w-4 h-4 shrink-0" /> {messages.sidebar.manager}
         </Button>
         <Button
           onClick={onOpenSettings}
-          variant="outline"
-          className="w-full justify-start gap-2 rounded-md border border-border bg-background shadow-sm hover:bg-muted/80"
+          variant="toolbar"
+          className="w-full justify-start gap-2"
           title="設定を開く"
         >
           <Settings className="w-4 h-4 shrink-0" /> {messages.sidebar.settings}
@@ -258,7 +233,7 @@ export function Sidebar(props: SidebarProps) {
                 {searchResults.length > 0 ? (
                   <div className="grid gap-1">
                     {searchResults.slice(0, SIDEBAR_SEARCH_PREVIEW_LIMIT).map((r) => {
-                      const fileName = r.path.split(/[/\\]/).pop() ?? r.path;
+                      const fileName = fileNameFromPath(r.path);
                       const tagHit = isTagSearchHit(r);
                       const lineHit = isLineSearchHit(r);
                       const label = tagHit
@@ -341,7 +316,7 @@ export function Sidebar(props: SidebarProps) {
                         "min-w-0 flex-1 truncate text-left text-xs hover:underline",
                         isCurrent ? "font-medium text-foreground" : "text-muted-foreground"
                       )}
-                      onClick={() => onOpenPresentedNote(p.boundPath!)}
+                      onClick={() => openPresentedNote(p.boundPath!)}
                       title={messages.sidebar.presentingOpenNote}
                     >
                       {p.fileName}
@@ -361,7 +336,7 @@ export function Sidebar(props: SidebarProps) {
                     variant="ghost"
                     size="icon-sm"
                     className="h-6 w-6 shrink-0"
-                    onClick={() => onReopenPresentationTab(p)}
+                    onClick={() => reopenPresentationTab(p)}
                     title={messages.sidebar.presentingOpenTab}
                     aria-label={messages.sidebar.presentingOpenTab}
                   >

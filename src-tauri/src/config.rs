@@ -217,3 +217,122 @@ pub fn save_config_file(app: &tauri::AppHandle, config: &AppConfig) -> Result<()
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_cfg() -> AppConfig {
+        AppConfig {
+            notes_dir: "scriptax-notes".into(),
+            pinned_paths: vec![],
+            template_tags: default_template_tags(),
+            theme_mode: String::new(),
+            theme_preset: String::new(),
+            seeded_notes: vec![],
+            setup_completed: None,
+            dark_mode_legacy: None,
+        }
+    }
+
+    #[test]
+    fn is_setup_completed_respects_explicit_flag() {
+        let mut cfg = base_cfg();
+        cfg.setup_completed = Some(false);
+        assert!(!is_setup_completed(&cfg));
+
+        cfg.setup_completed = Some(true);
+        assert!(is_setup_completed(&cfg));
+    }
+
+    #[test]
+    fn is_setup_completed_legacy_none_uses_notes_dir() {
+        let mut cfg = base_cfg();
+        cfg.setup_completed = None;
+        cfg.notes_dir = "my-notes".into();
+        assert!(is_setup_completed(&cfg));
+
+        cfg.notes_dir = "   ".into();
+        assert!(!is_setup_completed(&cfg));
+    }
+
+    #[test]
+    fn normalize_theme_mode_from_legacy_dark_mode() {
+        let mut cfg = base_cfg();
+        cfg.dark_mode_legacy = Some(true);
+        normalize_theme_mode(&mut cfg);
+        assert_eq!(cfg.theme_mode, "dark");
+
+        cfg = base_cfg();
+        cfg.dark_mode_legacy = Some(false);
+        normalize_theme_mode(&mut cfg);
+        assert_eq!(cfg.theme_mode, "light");
+
+        cfg = base_cfg();
+        normalize_theme_mode(&mut cfg);
+        assert_eq!(cfg.theme_mode, "system");
+    }
+
+    #[test]
+    fn normalize_theme_mode_clamps_invalid_values() {
+        let mut cfg = base_cfg();
+        cfg.theme_mode = "DARK".into();
+        normalize_theme_mode(&mut cfg);
+        assert_eq!(cfg.theme_mode, "dark");
+
+        cfg.theme_mode = "neon".into();
+        normalize_theme_mode(&mut cfg);
+        assert_eq!(cfg.theme_mode, "system");
+    }
+
+    #[test]
+    fn normalize_theme_preset_defaults_and_clamps() {
+        let mut cfg = base_cfg();
+        normalize_theme_preset(&mut cfg);
+        assert_eq!(cfg.theme_preset, "default");
+
+        cfg.theme_preset = "SEPIA".into();
+        normalize_theme_preset(&mut cfg);
+        assert_eq!(cfg.theme_preset, "sepia");
+
+        cfg.theme_preset = "unknown".into();
+        normalize_theme_preset(&mut cfg);
+        assert_eq!(cfg.theme_preset, "default");
+    }
+
+    #[test]
+    fn deserializes_camel_case_and_legacy_aliases() {
+        let json = r#"{
+            "notesDir": "my-notes",
+            "templateTags": ["todo"],
+            "themeMode": "dark",
+            "themePreset": "sepia",
+            "setupCompleted": true,
+            "darkMode": true
+        }"#;
+        let mut cfg: AppConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.notes_dir, "my-notes");
+        assert_eq!(cfg.template_tags, vec!["todo"]);
+        assert_eq!(cfg.setup_completed, Some(true));
+        assert_eq!(cfg.dark_mode_legacy, Some(true));
+        normalize_theme_mode(&mut cfg);
+        assert_eq!(cfg.theme_mode, "dark");
+    }
+
+    #[test]
+    fn deserializes_snake_case_aliases() {
+        let json = r#"{
+            "notes_dir": "notes",
+            "template_tags": ["idea"],
+            "theme_mode": "light",
+            "theme_preset": "high-contrast",
+            "setup_completed": false
+        }"#;
+        let cfg: AppConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.notes_dir, "notes");
+        assert_eq!(cfg.template_tags, vec!["idea"]);
+        assert_eq!(cfg.theme_mode, "light");
+        assert_eq!(cfg.theme_preset, "high-contrast");
+        assert_eq!(cfg.setup_completed, Some(false));
+    }
+}

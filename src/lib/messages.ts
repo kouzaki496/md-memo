@@ -104,7 +104,7 @@ export const messages = {
     newMemo: "新規メモ",
     manager: "一覧管理",
     settings: "設定",
-    searchPlaceholder: "メモを検索…（#タグ / \"完全一致\" / 本文はあいまい）",
+    searchPlaceholder: "検索…（#タグ / \"完全一致\"）",
     searchNoResults: "一致するメモはありません",
     searchSearching: "検索中…",
     searchViewInManager: (remaining: number) =>
@@ -192,7 +192,7 @@ export const messages = {
 
   manager: {
     title: "メモ一覧管理",
-    searchPlaceholder: "本文あいまい検索（#タグ / \"完全一致\"）",
+    searchPlaceholder: "検索（#タグ / \"完全一致\"）",
     maxCharsPlaceholder: "最大文字数（例: 100）",
     selectAll: "表示中を全選択",
     clearSelection: "選択解除",
@@ -285,6 +285,8 @@ export const messages = {
 
     internal_lock_failed: (detail?: string) =>
       detail ? `内部エラーが発生しました: ${detail}` : "内部エラーが発生しました",
+    search_task_failed: (detail?: string) =>
+      detail ? `検索に失敗しました: ${detail}` : "検索に失敗しました",
     unknown: (detail?: string) => (detail ? `エラー: ${detail}` : "エラーが発生しました"),
   },
 } as const;

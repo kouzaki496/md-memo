@@ -1,0 +1,208 @@
+{
+  "version": 2,
+  "description": "FE (TypeScript) と BE (Rust) のフロントマター / タグ処理共有契約。パース・正規化・toggle / rebuild の正とする。",
+  "constants": {
+    "inboxTag": "inbox"
+  },
+  "reservedTags": {
+    "builtinReservedTag": "_builtin",
+    "referencePurposeTag": "reference",
+    "shortcutsPurposeTag": "shortcuts",
+    "builtinTagsReference": ["_builtin", "reference"],
+    "builtinTagsShortcuts": ["_builtin", "shortcuts"]
+  },
+  "isBuiltinReservedTag": [
+    { "id": "plain", "tag": "_builtin", "reserved": true },
+    { "id": "hash-prefix", "tag": "#_builtin", "reserved": true },
+    { "id": "case-insensitive", "tag": "_BUILTIN", "reserved": true },
+    { "id": "work", "tag": "work", "reserved": false },
+    { "id": "reference-purpose", "tag": "reference", "reserved": false }
+  ],
+  "parseContentTags": [
+    {
+      "id": "array-syntax",
+      "content": "---\ntags: [work, draft]\n---\n\n# Title\n",
+      "tags": ["work", "draft"]
+    },
+    {
+      "id": "comma-separated",
+      "content": "---\ntags: work, draft\n---\n\nbody",
+      "tags": ["work", "draft"]
+    },
+    {
+      "id": "no-frontmatter",
+      "content": "# Hello",
+      "tags": []
+    },
+    {
+      "id": "empty-array",
+      "content": "---\ntags: []\n---\n\nbody",
+      "tags": []
+    },
+    {
+      "id": "first-tags-line-wins",
+      "content": "---\ntags: first\nTags: second\n---\n\nbody",
+      "tags": ["first"]
+    },
+    {
+      "id": "tags-key-case-insensitive",
+      "content": "---\nTags: Work\n---\n\nbody",
+      "tags": ["Work"]
+    },
+    {
+      "id": "quoted-array-items",
+      "content": "---\ntags: [\"work\", 'draft']\n---\n\nbody",
+      "tags": ["work", "draft"]
+    },
+    {
+      "id": "unclosed-frontmatter",
+      "content": "---\ntags: work\n",
+      "tags": []
+    }
+  ],
+  "parseNoteContent": [
+    {
+      "id": "array-syntax",
+      "content": "---\ntags: [work, draft]\n---\n\n# Title\n",
+      "hasFrontmatter": true,
+      "tags": ["work", "draft"],
+      "body": "# Title\n"
+    },
+    {
+      "id": "comma-separated",
+      "content": "---\ntags: work, draft\n---\n\nbody",
+      "hasFrontmatter": true,
+      "tags": ["work", "draft"],
+      "body": "body"
+    },
+    {
+      "id": "no-frontmatter",
+      "content": "# Hello",
+      "hasFrontmatter": false,
+      "tags": [],
+      "body": "# Hello"
+    }
+  ],
+  "markdownBody": [
+    {
+      "id": "strips-frontmatter",
+      "content": "---\ntags: []\n---\n\nvisible",
+      "body": "visible"
+    }
+  ],
+  "markdownBodyStartOffset": [
+    {
+      "id": "after-closing-fm",
+      "content": "---\ntags: []\n---\n\nbody",
+      "offset": 18
+    },
+    {
+      "id": "no-frontmatter",
+      "content": "plain",
+      "offset": 0
+    }
+  ],
+  "dedupeTags": [
+    {
+      "id": "keeps-first-casing",
+      "input": ["Work", "work", "WORK"],
+      "output": ["Work"]
+    }
+  ],
+  "normalizeInboxExclusive": [
+    {
+      "id": "removes-inbox-when-other-tags",
+      "input": ["inbox", "work"],
+      "output": ["work"]
+    },
+    {
+      "id": "keeps-single-non-inbox",
+      "input": ["work"],
+      "output": ["work"]
+    },
+    {
+      "id": "defaults-to-inbox-when-empty",
+      "input": [],
+      "output": ["inbox"]
+    }
+  ],
+  "ensureLockedInboxFirst": [
+    {
+      "id": "inbox-first-no-duplicates",
+      "input": ["draft", "inbox", "work"],
+      "output": ["inbox", "draft", "work"]
+    },
+    {
+      "id": "strips-builtin-reserved",
+      "input": ["draft", "_builtin", "inbox"],
+      "output": ["inbox", "draft"]
+    }
+  ],
+  "applyTagRename": [
+    {
+      "id": "case-insensitive-from",
+      "input": ["Work", "draft"],
+      "from": "work",
+      "to": "WORK",
+      "output": ["WORK", "draft"]
+    }
+  ],
+  "toggleTag": [
+    {
+      "id": "add-tag-no-frontmatter",
+      "content": "hello",
+      "tag": "work",
+      "tags": ["work"]
+    },
+    {
+      "id": "add-work-removes-inbox",
+      "content": "---\ntags: inbox\n---\n\nbody",
+      "tag": "work",
+      "tags": ["work"]
+    },
+    {
+      "id": "remove-last-restores-inbox",
+      "content": "---\ntags: work\n---\n\nbody",
+      "tag": "work",
+      "tags": ["inbox"]
+    },
+    {
+      "id": "remove-existing",
+      "content": "---\ntags: work, draft\n---\n\nbody",
+      "tag": "work",
+      "tags": ["draft"]
+    },
+    {
+      "id": "reserved-noop",
+      "content": "---\ntags: work\n---\n\nbody",
+      "tag": "_builtin",
+      "tags": ["work"]
+    },
+    {
+      "id": "empty-tag-noop",
+      "content": "---\ntags: work\n---\n\nbody",
+      "tag": "",
+      "tags": ["work"]
+    },
+    {
+      "id": "preserve-other-fm-fields",
+      "content": "---\ntitle: Memo\ntags: draft\n---\n\nbody",
+      "tag": "work",
+      "tags": ["draft", "work"]
+    }
+  ],
+  "rebuildTags": [
+    {
+      "id": "replace-tags-keep-body",
+      "content": "---\ntitle: Memo\ntags: draft\n---\n\nbody",
+      "nextTags": ["work", "draft"],
+      "tags": ["work", "draft"]
+    },
+    {
+      "id": "inbox-to-work",
+      "content": "---\ntags: inbox\n---\n\nbody",
+      "nextTags": ["work"],
+      "tags": ["work"]
+    }
+  ]
+}

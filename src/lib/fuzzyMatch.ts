@@ -8,6 +8,30 @@ function termHasUppercase(term: string): boolean {
   return /[\p{Lu}]/u.test(term);
 }
 
+function findCaseInsensitiveIndex(text: string, needle: string, from: number): number {
+  return text.toLowerCase().indexOf(needle.toLowerCase(), from);
+}
+
+/** Rust `ExactMatcher` と同等の部分一致ハイライト範囲（UTF-16 index） */
+export function exactSubstringHighlightRanges(
+  text: string,
+  term: string
+): Array<{ start: number; end: number }> {
+  if (!term) return [];
+  const ranges: Array<{ start: number; end: number }> = [];
+  const caseSensitive = termHasUppercase(term);
+  let from = 0;
+  while (from < text.length) {
+    const index = caseSensitive
+      ? text.indexOf(term, from)
+      : findCaseInsensitiveIndex(text, term, from);
+    if (index === -1) break;
+    ranges.push({ start: index, end: index + term.length });
+    from = index + term.length;
+  }
+  return ranges;
+}
+
 function levenshteinChars(a: string, b: string): number {
   const ac = [...a];
   const bc = [...b];
@@ -67,12 +91,19 @@ export function splitWordsWithRanges(text: string): Array<{ word: string; start:
   return out;
 }
 
-/** fuzzy 語がヒットした本文語の範囲（UTF-16 index） */
+/**
+ * Rust `FuzzyMatcher::match_score` と同等のハイライト範囲。
+ * 部分一致 → 短語 exact → 語単位 fuzzy の順。
+ */
 export function fuzzyWordHighlightRanges(
   text: string,
   term: string
 ): Array<{ start: number; end: number }> {
   if (!term) return [];
+
+  const exactRanges = exactSubstringHighlightRanges(text, term);
+  if (exactRanges.length > 0) return exactRanges;
+
   if (termHasUppercase(term)) return [];
   if ([...term].length < MIN_FUZZY_TERM_LEN) return [];
 

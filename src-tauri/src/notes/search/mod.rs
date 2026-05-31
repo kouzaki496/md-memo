@@ -1,10 +1,18 @@
 //! メモ検索（タグ / 本文 AND）
 
-use super::match_strategy::{
-    all_terms_match_tags, ExactMatcher, FuzzyMatcher, LineTermMatcher, MatchMode, TagTermMatcher,
+mod query_parse;
+mod scoring;
+
+pub(crate) use query_parse::{parse_raw_terms, BodyTerm, RawTerm};
+
+use super::match_strategy::{all_terms_match_tags, ExactMatcher, MatchMode, TagTermMatcher};
+use query_parse::{parse_query, search_mode_for_kind, QueryKind};
+use scoring::{
+    all_body_terms_match, body_hit, body_term_matches, compute_body_hit_score, mixed_hit,
+    sort_hits, tag_hit, SearchMatchCtx,
 };
 use super::search_cache::{collect_cached_markdown_paths, load_parsed_note, ParsedNote};
-use super::store::{file_timestamps_ms, resolve_notes_root};
+use super::store::resolve_notes_root;
 use super::types::{SearchHit, SearchMode, SearchNotesResult};
 use crate::app_error::{self, err};
 use rayon::prelude::*;
@@ -12,261 +20,6 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
-
-/// 本文検索語。`exact: true` は `"` 囲み or 全語 exact モード。
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct BodyTerm {
-    text: String,
-    exact: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum RawTerm {
-    Tag(String),
-    Body(BodyTerm),
-}
-
-fn push_classified(out: &mut Vec<RawTerm>, text: &str, quoted: bool, force_all_exact: bool) {
-    let body_exact = quoted || force_all_exact;
-    if !quoted && !body_exact && text.starts_with('#') {
-        let tag = text.trim_start_matches('#').trim();
-        if !tag.is_empty() {
-            out.push(RawTerm::Tag(tag.to_string()));
-            return;
-        }
-    }
-    out.push(RawTerm::Body(BodyTerm {
-        text: text.to_string(),
-        exact: body_exact,
-    }));
-}
-
-/// 空白区切り + `"` … `"` フレーズ。未閉じ `"` は末尾まで exact 語として扱う。
-fn parse_raw_terms(query: &str, force_all_exact: bool) -> Vec<RawTerm> {
-    let mut out = Vec::new();
-    let chars: Vec<char> = query.chars().collect();
-    let mut i = 0;
-    while i < chars.len() {
-        while i < chars.len() && chars[i].is_whitespace() {
-            i += 1;
-        }
-        if i >= chars.len() {
-            break;
-        }
-        if chars[i] == '"' {
-            i += 1;
-            let start = i;
-            let mut closed = false;
-            while i < chars.len() {
-                if chars[i] == '"' {
-                    closed = true;
-                    let content: String = chars[start..i].iter().collect();
-                    i += 1;
-                    if !content.is_empty() {
-                        push_classified(&mut out, &content, true, force_all_exact);
-                    }
-                    break;
-                }
-                i += 1;
-            }
-            if !closed {
-                let content: String = chars[start..].iter().collect();
-                if !content.is_empty() {
-                    push_classified(&mut out, &content, true, force_all_exact);
-                }
-                break;
-            }
-        } else {
-            let start = i;
-            while i < chars.len() && !chars[i].is_whitespace() {
-                i += 1;
-            }
-            let word: String = chars[start..i].iter().collect();
-            if !word.is_empty() {
-                push_classified(&mut out, &word, false, force_all_exact);
-            }
-        }
-    }
-    out
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum QueryKind {
-    Tag,
-    Body,
-    Mixed,
-}
-
-struct ParsedQuery {
-    kind: QueryKind,
-    tag_terms: Vec<String>,
-    body_terms: Vec<BodyTerm>,
-}
-
-/// `#` 始まり（引用符外）の語はタグ、それ以外は本文。両方あれば複合 AND。
-fn parse_query(query: &str, force_all_exact: bool) -> ParsedQuery {
-    let raw = parse_raw_terms(query, force_all_exact);
-    if raw.is_empty() {
-        return ParsedQuery {
-            kind: QueryKind::Body,
-            tag_terms: vec![],
-            body_terms: vec![],
-        };
-    }
-
-    let mut tag_terms = Vec::new();
-    let mut body_terms = Vec::new();
-    let mut saw_hash_only = false;
-
-    for term in raw {
-        match term {
-            RawTerm::Tag(tag) => tag_terms.push(tag),
-            RawTerm::Body(body) => {
-                if body.text.starts_with('#') {
-                    saw_hash_only = true;
-                }
-                body_terms.push(body);
-            }
-        }
-    }
-
-    let kind = if !tag_terms.is_empty() && !body_terms.is_empty() {
-        QueryKind::Mixed
-    } else if !tag_terms.is_empty() {
-        QueryKind::Tag
-    } else if saw_hash_only {
-        QueryKind::Tag
-    } else {
-        QueryKind::Body
-    };
-
-    ParsedQuery {
-        kind,
-        tag_terms,
-        body_terms,
-    }
-}
-
-struct SearchMatchCtx {
-    /// true = 全本文語を exact（`MatchMode::Exact` テスト用）
-    force_all_exact: bool,
-}
-
-fn body_term_matches(line: &str, term: &BodyTerm, ctx: &SearchMatchCtx) -> bool {
-    if term.exact || ctx.force_all_exact {
-        ExactMatcher.matches_line(line, &term.text)
-    } else {
-        FuzzyMatcher.matches_line(line, &term.text)
-    }
-}
-
-fn body_term_score(line: &str, term: &BodyTerm, ctx: &SearchMatchCtx) -> Option<f32> {
-    if term.exact || ctx.force_all_exact {
-        if ExactMatcher.matches_line(line, &term.text) {
-            Some(1.0)
-        } else {
-            None
-        }
-    } else {
-        FuzzyMatcher.match_score(line, &term.text)
-    }
-}
-
-fn all_body_terms_match(
-    lines: &[(usize, &String)],
-    terms: &[BodyTerm],
-    ctx: &SearchMatchCtx,
-) -> bool {
-    terms.iter().all(|term| {
-        lines
-            .iter()
-            .any(|(_, line)| body_term_matches(line, term, ctx))
-    })
-}
-
-fn compute_body_hit_score(
-    lines: &[(usize, &String)],
-    terms: &[BodyTerm],
-    ctx: &SearchMatchCtx,
-) -> Option<f32> {
-    if terms.is_empty() {
-        return None;
-    }
-    let use_fuzzy = !ctx.force_all_exact;
-    let mut min_score = 1.0f32;
-    let mut any_fuzzy = false;
-
-    for term in terms {
-        let best = lines
-            .iter()
-            .filter_map(|(_, line)| body_term_score(line, term, ctx))
-            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))?;
-        if use_fuzzy && !term.exact && best < 1.0 - f32::EPSILON {
-            any_fuzzy = true;
-        }
-        min_score = min_score.min(best);
-    }
-
-    if any_fuzzy {
-        Some(min_score)
-    } else {
-        None
-    }
-}
-
-fn search_mode_for_kind(kind: QueryKind) -> SearchMode {
-    match kind {
-        QueryKind::Tag => SearchMode::Tag,
-        QueryKind::Body => SearchMode::Body,
-        QueryKind::Mixed => SearchMode::Mixed,
-    }
-}
-
-fn tag_hit(path: String, text: String) -> SearchHit {
-    SearchHit {
-        path,
-        line: 0,
-        text,
-        mode: SearchMode::Tag,
-        score: None,
-    }
-}
-
-fn body_hit(path: String, line: usize, text: String, score: Option<f32>) -> SearchHit {
-    SearchHit {
-        path,
-        line,
-        text,
-        mode: SearchMode::Body,
-        score,
-    }
-}
-
-fn mixed_hit(path: String, line: usize, text: String, score: Option<f32>) -> SearchHit {
-    SearchHit {
-        path,
-        line,
-        text,
-        mode: SearchMode::Mixed,
-        score,
-    }
-}
-
-fn sort_hits(hits: &mut [SearchHit]) {
-    hits.sort_by(|a, b| {
-        let sa = a.score.unwrap_or(1.0);
-        let sb = b.score.unwrap_or(1.0);
-        sb.partial_cmp(&sa)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| {
-                let (au, ac) = file_timestamps_ms(Path::new(&a.path));
-                let (bu, bc) = file_timestamps_ms(Path::new(&b.path));
-                bu.cmp(&au)
-                    .then_with(|| bc.cmp(&ac))
-                    .then_with(|| a.path.cmp(&b.path))
-            })
-    });
-}
 
 fn search_by_tags(
     notes_root: &Path,
@@ -299,7 +52,7 @@ fn search_by_tags(
 
 fn search_by_body(
     notes_root: &Path,
-    terms: &[BodyTerm],
+    terms: &[query_parse::BodyTerm],
     ctx: &SearchMatchCtx,
 ) -> Result<Vec<SearchHit>, String> {
     let paths = collect_cached_markdown_paths(notes_root)?;
@@ -318,7 +71,7 @@ fn search_by_body(
 fn search_by_mixed(
     notes_root: &Path,
     tag_terms: &[String],
-    body_terms: &[BodyTerm],
+    body_terms: &[query_parse::BodyTerm],
     ctx: &SearchMatchCtx,
 ) -> Result<Vec<SearchHit>, String> {
     let paths = collect_cached_markdown_paths(notes_root)?;
@@ -338,7 +91,7 @@ fn search_by_mixed(
 fn search_body_in_note(
     path_str: &str,
     note: &ParsedNote,
-    terms: &[BodyTerm],
+    terms: &[query_parse::BodyTerm],
     ctx: &SearchMatchCtx,
 ) -> Option<SearchHit> {
     let searchable = searchable_lines(&note.lines);
@@ -367,7 +120,7 @@ fn search_mixed_in_note(
     path_str: &str,
     note: &ParsedNote,
     tag_terms: &[String],
-    body_terms: &[BodyTerm],
+    body_terms: &[query_parse::BodyTerm],
     tag_matcher: &ExactMatcher,
     ctx: &SearchMatchCtx,
 ) -> Option<SearchHit> {
@@ -452,14 +205,12 @@ fn search_notes_in_root_impl(
             }
             search_by_body(notes_root, &parsed.body_terms, &ctx)?
         }
-        QueryKind::Mixed => {
-            search_by_mixed(
-                notes_root,
-                &parsed.tag_terms,
-                &parsed.body_terms,
-                &ctx,
-            )?
-        }
+        QueryKind::Mixed => search_by_mixed(
+            notes_root,
+            &parsed.tag_terms,
+            &parsed.body_terms,
+            &ctx,
+        )?,
     };
 
     Ok(SearchNotesResult {
@@ -500,7 +251,7 @@ pub async fn search_notes(
     let notes_root = resolve_notes_root(&app)?;
     tauri::async_runtime::spawn_blocking(move || search_notes_in_root(&notes_root, &query))
         .await
-        .map_err(|e| format!("search_task_failed: {e}"))?
+        .map_err(|e| app_error::with_detail(app_error::SEARCH_TASK_FAILED, e))?
 }
 
 pub fn invalidate_search_cache() {
@@ -809,47 +560,6 @@ mod tests {
         assert!(phrase.hits[0].score.is_none());
 
         let _ = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn parse_raw_terms_handles_quoted_phrase_and_tags() {
-        let terms = parse_raw_terms("#work \"weekly report\" meetng", false);
-        assert_eq!(terms.len(), 3);
-        assert!(matches!(&terms[0], RawTerm::Tag(t) if t == "work"));
-        assert!(matches!(
-            &terms[1],
-            RawTerm::Body(BodyTerm { text, exact: true }) if text == "weekly report"
-        ));
-        assert!(matches!(
-            &terms[2],
-            RawTerm::Body(BodyTerm { text, exact: false }) if text == "meetng"
-        ));
-    }
-
-    #[test]
-    fn parse_raw_terms_unclosed_quote_to_end() {
-        let terms = parse_raw_terms("\"hello world", false);
-        assert_eq!(terms.len(), 1);
-        assert!(matches!(
-            &terms[0],
-            RawTerm::Body(BodyTerm { text, exact: true }) if text == "hello world"
-        ));
-    }
-
-    #[test]
-    fn empty_quoted_term_is_skipped() {
-        let terms = parse_raw_terms("\"\"", false);
-        assert!(terms.is_empty());
-    }
-
-    #[test]
-    fn quoted_hash_is_body_not_tag() {
-        let terms = parse_raw_terms("\"#work\"", false);
-        assert_eq!(terms.len(), 1);
-        assert!(matches!(
-            &terms[0],
-            RawTerm::Body(BodyTerm { text, exact: true }) if text == "#work"
-        ));
     }
 
     #[test]

@@ -26,7 +26,7 @@ export function parseBodyHighlightTerms(query: string): ParsedBodyTerm[] {
           closed = true;
           const text = chars.slice(start, i).join("");
           i += 1;
-          if (text.length > 0 && !text.startsWith("#")) {
+          if (text.length > 0) {
             out.push({ text, exact: true });
           }
           break;
@@ -35,7 +35,7 @@ export function parseBodyHighlightTerms(query: string): ParsedBodyTerm[] {
       }
       if (!closed) {
         const text = chars.slice(start).join("");
-        if (text.length > 0 && !text.startsWith("#")) {
+        if (text.length > 0) {
           out.push({ text, exact: true });
         }
         break;

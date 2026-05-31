@@ -1,13 +1,14 @@
 import type { AppConfig } from "@/types/config";
-import { ensureLockedInboxInTemplateTags } from "@/lib/noteTags";
+import { normalizeAppConfig, normalizeThemeMode, normalizeThemePreset } from "@/lib/config";
 
 /** 設定画面で編集する項目だけを比較用に正規化する */
 export function getSettingsComparable(config: AppConfig) {
+  const normalized = normalizeAppConfig(config);
   return {
-    notesDir: config.notesDir.trim(),
-    templateTags: ensureLockedInboxInTemplateTags(config.templateTags ?? []),
-    themeMode: config.themeMode ?? (config.darkMode ? "dark" : "light"),
-    themePreset: config.themePreset ?? "default",
+    notesDir: normalized.notesDir,
+    templateTags: normalized.templateTags,
+    themeMode: normalizeThemeMode(normalized),
+    themePreset: normalizeThemePreset(normalized.themePreset),
   };
 }
 

@@ -15,65 +15,14 @@ fn line_starts_with_tags_ci(line: &str) -> bool {
     t.len() >= 5 && t[..5].eq_ignore_ascii_case("tags:")
 }
 
-pub(crate) fn parse_tags_from_content(content: &str) -> Vec<String> {
-    let mut lines = content.lines();
-    if lines.next().map(str::trim) != Some("---") {
-        return vec![];
-    }
-
-    let mut tags_line = None;
-    for line in lines.by_ref() {
-        let t = line.trim();
-        if t == "---" {
-            break;
-        }
-        if t.to_ascii_lowercase().starts_with("tags:") {
-            tags_line = Some(t["tags:".len()..].trim().to_string());
-        }
-    }
-
-    let Some(raw) = tags_line else {
-        return vec![];
-    };
-
+/// `tags:` 行の値部分（`work, draft` / `[work, draft]`）をパースする。
+fn parse_tags_value(raw: &str) -> Vec<String> {
     let val = raw.trim();
     if val.is_empty() {
         return vec![];
     }
     if val.starts_with('[') && val.ends_with(']') {
-        let inner = &val[1..val.len() - 1];
-        return inner
-            .split(',')
-            .map(|s| s.trim().trim_matches('"').trim_matches('\''))
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
-            .collect();
-    }
-
-    val.split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .collect()
-}
-
-pub(crate) fn parse_tags_from_fm_inner(fm: &str) -> Vec<String> {
-    let mut raw_val: Option<String> = None;
-    for line in fm.lines() {
-        let t = line.trim_start();
-        if t.len() >= 5 && t[..5].eq_ignore_ascii_case("tags:") {
-            raw_val = Some(t[5..].trim().to_string());
-            break;
-        }
-    }
-    let Some(raw) = raw_val else {
-        return vec![];
-    };
-    if raw.is_empty() {
-        return vec![];
-    }
-    if raw.starts_with('[') && raw.ends_with(']') {
-        let inner = raw[1..raw.len() - 1].trim();
+        let inner = val[1..val.len() - 1].trim();
         if inner.is_empty() {
             return vec![];
         }
@@ -87,10 +36,29 @@ pub(crate) fn parse_tags_from_fm_inner(fm: &str) -> Vec<String> {
             .filter(|s| !s.is_empty())
             .collect();
     }
-    raw.split(',')
+    val.split(',')
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect()
+}
+
+/// フロントマター内テキストから tags を読む（最初の `tags:` 行のみ）。
+pub(crate) fn parse_tags_from_fm_inner(fm: &str) -> Vec<String> {
+    for line in fm.lines() {
+        let t = line.trim_start();
+        if t.len() >= 5 && t[..5].eq_ignore_ascii_case("tags:") {
+            return parse_tags_value(&t[5..]);
+        }
+    }
+    vec![]
+}
+
+/// メモ全文から tags を読む（regex で FM を抽出 → `parse_tags_from_fm_inner`）。
+pub(crate) fn parse_tags_from_content(content: &str) -> Vec<String> {
+    note_frontmatter_regex()
+        .captures(content)
+        .map(|cap| parse_tags_from_fm_inner(cap.get(1).map(|m| m.as_str()).unwrap_or("")))
+        .unwrap_or_default()
 }
 
 pub(crate) fn dedupe_tags_case_insensitive(tags: Vec<String>) -> Vec<String> {
@@ -120,10 +88,12 @@ pub(crate) fn normalize_inbox_exclusive_tags(tags: Vec<String>) -> Vec<String> {
 }
 
 pub(crate) fn apply_tag_rename(tags: Vec<String>, from: &str, to: &str) -> Vec<String> {
+    let from_trim = from.trim();
+    let to_trim = to.trim();
     tags.into_iter()
         .map(|t| {
-            if t.eq_ignore_ascii_case(from) {
-                to.to_string()
+            if t.eq_ignore_ascii_case(from_trim) {
+                to_trim.to_string()
             } else {
                 t
             }
@@ -168,6 +138,40 @@ pub(crate) fn rebuild_note_frontmatter_tags(content: &str, next_tags: Vec<String
     Some(format!("---\n{new_fm}\n---\n{body}"))
 }
 
+fn normalize_toggle_tag(tag: &str) -> &str {
+    tag.trim().trim_start_matches('#')
+}
+
+/// エディタのタグ toggle と同等（結果 tags を契約テストで FE と同期）。
+pub(crate) fn toggle_tag_in_content(content: &str, tag: &str) -> String {
+    let normalized = normalize_toggle_tag(tag);
+    if normalized.is_empty() {
+        return content.to_string();
+    }
+    if system_notes::is_builtin_reserved_tag_name(normalized) {
+        return content.to_string();
+    }
+
+    let has_fm = note_frontmatter_regex().captures(content).is_some();
+    let mut next_tags = parse_tags_from_content(content);
+    if let Some(idx) = next_tags
+        .iter()
+        .position(|t| t.eq_ignore_ascii_case(normalized))
+    {
+        next_tags.remove(idx);
+    } else {
+        next_tags.push(normalized.to_string());
+    }
+    next_tags = normalize_inbox_exclusive_tags(next_tags);
+
+    if has_fm {
+        return rebuild_note_frontmatter_tags(content, next_tags)
+            .unwrap_or_else(|| content.to_string());
+    }
+
+    format!("---\ntags: {}\n---\n{}", next_tags.join(", "), content)
+}
+
 pub(crate) fn merge_required_tags(existing: Vec<String>, required: &[&str]) -> Vec<String> {
     use std::collections::HashSet;
     let mut out = Vec::new();
@@ -193,4 +197,52 @@ pub(crate) fn merge_required_tags(existing: Vec<String>, required: &[&str]) -> V
     }
 
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_tags_from_content_delegates_to_fm_inner() {
+        let content = "---\ntags: work, draft\n---\n\n# Title\n";
+        assert_eq!(parse_tags_from_content(content), vec!["work", "draft"]);
+        assert_eq!(
+            parse_tags_from_fm_inner("tags: work, draft"),
+            parse_tags_from_content(content)
+        );
+    }
+
+    #[test]
+    fn parse_tags_uses_first_tags_line() {
+        let fm = "tags: first\nTags: second";
+        assert_eq!(parse_tags_from_fm_inner(fm), vec!["first"]);
+    }
+
+    #[test]
+    fn parse_tags_from_content_without_closing_fm_returns_empty() {
+        assert_eq!(parse_tags_from_content("---\ntags: work\n"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn toggle_tag_adds_frontmatter_when_missing() {
+        let next = toggle_tag_in_content("hello", "work");
+        assert_eq!(parse_tags_from_content(&next), vec!["work"]);
+    }
+
+    #[test]
+    fn merge_required_tags_preserves_existing_casing() {
+        let existing = vec!["Reference".into(), "draft".into()];
+        let required = &["reference", "_builtin"];
+        let out = merge_required_tags(existing, required);
+        assert_eq!(out, vec!["Reference", "_builtin", "draft"]);
+    }
+
+    #[test]
+    fn merge_required_tags_dedupes_case_insensitive() {
+        let existing = vec!["Work".into(), "work".into(), "draft".into()];
+        let required = &["work"];
+        let out = merge_required_tags(existing, required);
+        assert_eq!(out, vec!["Work", "draft"]);
+    }
 }

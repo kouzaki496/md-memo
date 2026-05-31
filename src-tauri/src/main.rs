@@ -10,6 +10,9 @@ mod presentation;
 mod preview_render;
 mod system_notes;
 
+#[cfg(test)]
+mod callout_contract;
+
 use tauri::{Manager, RunEvent, WindowEvent};
 
 fn main() {

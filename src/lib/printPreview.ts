@@ -33,18 +33,6 @@ const PRINT_STYLE = `
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
-  .markdown-preview .md-callout--info {
-    background: #cfe3c1 !important;
-  }
-  .markdown-preview .md-callout--tip {
-    background: #cbe8dc !important;
-  }
-  .markdown-preview .md-callout--warn {
-    background: #f1e2a9 !important;
-  }
-  .markdown-preview .md-callout--alert {
-    background: #edc8cc !important;
-  }
   @media print {
     *, *::before, *::after {
       -webkit-print-color-adjust: exact !important;

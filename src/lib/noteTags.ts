@@ -70,11 +70,6 @@ export function mergeTagLists(primary: string[], secondary: string[]): string[] 
   return [...base, ...additions];
 }
 
-/** @deprecated use mergeTagLists */
-export function mergeDiscoveredTemplateTags(templateTags: string[], discoveredTags: string[]): string[] {
-  return mergeTagLists(templateTags, discoveredTags);
-}
-
 /** テンプレートに未登録だが、いずれかのメモで使用中のタグ */
 export function getOrphanTags(templateTags: string[], tagsInUse: string[]): string[] {
   const registered = new Set(ensureLockedInboxInTemplateTags(templateTags).map((t) => t.toLowerCase()));
@@ -96,7 +91,7 @@ export function buildEditorTagChips(templateTags: string[], noteTags: string[]):
 }
 
 /** Inbox 以外が 1 つでもあれば Inbox を全て外す。それ以外は Inbox のみ */
-function normalizeInboxExclusiveTags(tags: string[]): string[] {
+export function normalizeInboxExclusiveTags(tags: string[]): string[] {
   const inboxL = DEFAULT_NEW_NOTE_TAG.toLowerCase();
   const withoutInbox = tags.filter((t) => t.toLowerCase() !== inboxL);
   if (withoutInbox.length > 0) {
@@ -176,6 +171,17 @@ export function replaceTagTokenInList(tags: string[], from: string, to: string):
   return tags.map((t) => (t.toLowerCase() === f ? toVal : t));
 }
 
+export function rebuildNoteFrontmatterTags(raw: string, nextTags: string[]): string | null {
+  const p = parseNoteContent(raw);
+  if (!p.hasFrontmatter) return null;
+  const fmLines = p.frontmatterRaw
+    .split(/\r?\n/)
+    .filter((l) => !/^\s*tags\s*:/i.test(l))
+    .filter((l) => l.trim().length > 0);
+  fmLines.push(`tags: ${nextTags.join(", ")}`);
+  return `---\n${fmLines.join("\n")}\n---\n${p.body}`;
+}
+
 export function toggleTagInContent(raw: string, tag: string): string {
   const normalized = tag.trim().replace(/^#+/, "");
   if (!normalized) return raw;
@@ -191,10 +197,8 @@ export function toggleTagInContent(raw: string, tag: string): string {
 
   nextTags = normalizeInboxExclusiveTags(nextTags);
 
-  const fmLines = p.hasFrontmatter
-    ? p.frontmatterRaw.split(/\r?\n/).filter((l) => !/^\s*tags\s*:/i.test(l)).filter((l) => l.trim().length > 0)
-    : [];
-
-  fmLines.push(`tags: ${nextTags.join(", ")}`);
-  return `---\n${fmLines.join("\n")}\n---\n${baseBody}`;
+  if (p.hasFrontmatter) {
+    return rebuildNoteFrontmatterTags(raw, nextTags) ?? raw;
+  }
+  return `---\ntags: ${nextTags.join(", ")}\n---\n${baseBody}`;
 }

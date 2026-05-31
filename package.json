@@ -10,6 +10,10 @@
     "dev": "node scripts/check-node.mjs && vite",
     "build": "node scripts/check-node.mjs && tsc && vite build",
     "preview": "node scripts/check-node.mjs && vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:contract": "vitest run src/lib/searchContract.test.ts src/lib/frontmatterContract.test.ts src/lib/calloutContract.test.ts && cd src-tauri && cargo test contract_",
+    "check:error-codes": "vitest run src/lib/errorCodesContract.test.ts",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -44,6 +48,7 @@
     "shadcn": "^4.6.0",
     "tailwindcss": "^4.2.4",
     "typescript": "~5.8.3",
-    "vite": "^7.0.4"
+    "vite": "^7.0.4",
+    "vitest": "^4.1.7"
   }
 }

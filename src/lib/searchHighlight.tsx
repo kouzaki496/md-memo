@@ -7,7 +7,7 @@ import {
 } from "react";
 import type { SearchMode } from "@/types/note";
 import type { ParsedBodyTerm } from "@/lib/searchQueryParse";
-import { fuzzyWordHighlightRanges } from "@/lib/fuzzyMatch";
+import { exactSubstringHighlightRanges, fuzzyWordHighlightRanges } from "@/lib/fuzzyMatch";
 
 export { parseBodyHighlightTerms } from "@/lib/searchQueryParse";
 
@@ -17,32 +17,6 @@ export const SEARCH_HIGHLIGHT_CLASS =
 export function isSearchHighlightActive(mode: SearchMode, query: string): boolean {
   if (!query.trim()) return false;
   return mode === "body" || mode === "mixed";
-}
-
-function termIsCaseSensitive(term: string): boolean {
-  return /[\p{Lu}]/u.test(term);
-}
-
-function findCaseInsensitiveIndex(text: string, needle: string, from: number): number {
-  return text.toLowerCase().indexOf(needle.toLowerCase(), from);
-}
-
-function collectSubstringRanges(
-  text: string,
-  term: string
-): Array<{ start: number; end: number }> {
-  const ranges: Array<{ start: number; end: number }> = [];
-  const caseSensitive = termIsCaseSensitive(term);
-  let from = 0;
-  while (from < text.length) {
-    const index = caseSensitive
-      ? text.indexOf(term, from)
-      : findCaseInsensitiveIndex(text, term, from);
-    if (index === -1) break;
-    ranges.push({ start: index, end: index + term.length });
-    from = index + term.length;
-  }
-  return ranges;
 }
 
 function mergeHighlightRanges(
@@ -69,8 +43,9 @@ function collectHighlightRanges(
   const ranges: Array<{ start: number; end: number }> = [];
   for (const term of terms) {
     if (!term.text) continue;
-    ranges.push(...collectSubstringRanges(text, term.text));
-    if (!term.exact) {
+    if (term.exact) {
+      ranges.push(...exactSubstringHighlightRanges(text, term.text));
+    } else {
       ranges.push(...fuzzyWordHighlightRanges(text, term.text));
     }
   }

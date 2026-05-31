@@ -188,7 +188,7 @@ pub fn import_from_path(app: &tauri::AppHandle, source_path: &str) -> Result<Str
     if !source.is_file() {
         return Err(err(app_error::ATTACHMENT_NOT_FOUND));
     }
-    let bytes = fs::read(&source).map_err(|e| io(app_error::ATTACHMENT_READ_FAILED, e))?;
+    let bytes = fs::read(&source).map_err(|e| io(app_error::ATTACHMENT_IMPORT_FAILED, e))?;
     let file_name = source
         .file_name()
         .and_then(|n| n.to_str())

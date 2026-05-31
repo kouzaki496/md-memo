@@ -34,7 +34,8 @@ exact 土台・あいまい検索（常時 + `"` 完全一致）まで実装済�
 
 ### 既知のギャップ（軽微）
 
-- フロントの検索ユニットテストなし
+- ~~フロントの検索ユニットテストなし~~ → Vitest で `fuzzyMatch` / `searchQueryParse` 等をカバー（2026-05-29）
+- FE↔BE 契約: `docs/search-contract.json` + `npm run test:contract`（2026-05-29）
 - tantivy は必要になったら
 - 非同期 invoke ✅（`search_notes` + フロント世代 ID）
 

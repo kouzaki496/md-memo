@@ -1,7 +1,5 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useEffect } from "react";
 import { messages } from "@/lib/messages";
 
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "svg"];
@@ -169,29 +167,4 @@ export async function readClipboardImageFile(
     if (syncFile) return syncFile;
   }
   return readAsyncClipboardImageFile();
-}
-
-/** Tauri では OS ドロップが DOM に届かないため Webview API で受ける */
-export function useTauriImageDrop(
-  enabled: boolean,
-  onDropImagePaths: (paths: string[]) => void
-) {
-  useEffect(() => {
-    if (!enabled || !isTauri()) return undefined;
-
-    let unlisten: (() => void) | undefined;
-    void getCurrentWebview()
-      .onDragDropEvent((event) => {
-        if (event.payload.type !== "drop") return;
-        const imagePaths = event.payload.paths.filter(isImagePath);
-        if (imagePaths.length > 0) onDropImagePaths(imagePaths);
-      })
-      .then((fn) => {
-        unlisten = fn;
-      });
-
-    return () => {
-      unlisten?.();
-    };
-  }, [enabled, onDropImagePaths]);
 }
