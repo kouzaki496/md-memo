@@ -64,6 +64,8 @@ export const messages = {
     notesDirBrowseTitle: "メモの保存先フォルダ",
     notesDirOpen: "フォルダを開く",
     notesDirResolved: (path: string) => `実際の保存先: ${path}`,
+    aboutTitle: "アプリについて",
+    version: (v: string) => `バージョン ${v}`,
     tagListTitle: "よく使うタグ",
     tagListHint:
       "編集画面のタグボタンに表示されます。一覧から外しても、すでに付いているメモのタグは残ります。",

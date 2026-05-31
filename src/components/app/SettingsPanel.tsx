@@ -8,6 +8,7 @@ import type { AppConfig } from "@/types/config";
 import type { NoteMeta } from "@/types/note";
 import { handleInvokeError } from "@/lib/handleInvokeError";
 import { messages } from "@/lib/messages";
+import { useAppVersion } from "@/hooks/useAppVersion";
 import { openNotesDirInExplorer, pickNotesDirFolder, resolveNotesDirPath } from "@/lib/notesDir";
 
 type SettingsPanelProps = {
@@ -46,6 +47,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
     onRemoveTagFromAllMemos,
   } = props;
 
+  const appVersion = useAppVersion();
   const [notesDirBusy, setNotesDirBusy] = useState(false);
   const [notesDirOpening, setNotesDirOpening] = useState(false);
   const [resolvedNotesDir, setResolvedNotesDir] = useState<string | null>(null);
@@ -169,6 +171,14 @@ export function SettingsPanel(props: SettingsPanelProps) {
           onAddOrphanToTemplate={onAddOrphanToTemplate}
           onRemoveTagFromAllMemos={onRemoveTagFromAllMemos}
         />
+
+        <section className="space-y-1 border-t pt-5">
+          <h3 className="text-sm font-semibold">{messages.settings.aboutTitle}</h3>
+          <p className="text-sm text-foreground">{messages.sidebar.appName}</p>
+          <p className="text-xs text-muted-foreground tabular-nums">
+            {appVersion ? messages.settings.version(appVersion) : "…"}
+          </p>
+        </section>
       </div>
     </main>
   );

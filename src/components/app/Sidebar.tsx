@@ -9,6 +9,7 @@ import { SearchFuzzyBadge } from "@/components/app/SearchMatchHint";
 import { useSidebarContext } from "@/contexts/SidebarContext";
 import { INBOX_EXCLUSIVE_MESSAGE } from "@/lib/noteTags";
 import { fileNameFromPath } from "@/lib/notePath";
+import { useAppVersion } from "@/hooks/useAppVersion";
 import { messages } from "@/lib/messages";
 import { cn } from "@/lib/utils";
 
@@ -55,6 +56,7 @@ export function Sidebar() {
     : isMixedSearch
       ? messages.sidebar.searchResultsMixed
       : messages.sidebar.searchResults;
+  const appVersion = useAppVersion();
   const [isRecentOpen, setIsRecentOpen] = useState(true);
   const prevIsSearchingRef = useRef(false);
 
@@ -95,7 +97,19 @@ export function Sidebar() {
     <aside className="h-full min-h-0 w-full overflow-hidden border-r bg-muted/35 backdrop-blur supports-[backdrop-filter]:bg-muted/20 flex flex-col">
       <div className="p-4 space-y-4 border-b bg-background/70">
         <div className="flex items-center justify-between">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{messages.sidebar.appName}</div>
+          <div className="flex min-w-0 items-baseline gap-2">
+            <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+              {messages.sidebar.appName}
+            </div>
+            {appVersion && (
+              <span
+                className="text-[10px] tabular-nums text-muted-foreground/75"
+                title={messages.settings.version(appVersion)}
+              >
+                v{appVersion}
+              </span>
+            )}
+          </div>
           <Button
             variant="toolbar"
             size="icon-sm"
