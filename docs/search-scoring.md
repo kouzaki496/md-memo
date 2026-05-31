@@ -158,5 +158,5 @@ fuzzy 比較時は **小文字化** してから距離を測る（部分一致�
 ## 将来の変更ポイント
 
 - 定数（`MIN_FUZZY_SCORE` / `MAX_EDIT_RATIO` / `MIN_FUZZY_TERM_LEN`）は `match_strategy.rs` 先頭。設定画面連携は未実装。
-- フロントでのスコア表示・fuzzy マッチ範囲のハイライトは未実装（`docs/search-roadmap.md` 参照）。
+- フロントでのスコア表示・fuzzy マッチ範囲のハイライトは未実装（`dev/search-roadmap.md` 参照）。
 - 日本語形態素解析ベースの fuzzy は未対応（現状は **単語トークン + Levenshtein**）。
