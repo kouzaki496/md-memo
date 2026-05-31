@@ -1,0 +1,122 @@
+/**
+ * 提示 viewer 用の prose タイポグラフィ（Tailwind Typography 相当の最小セット）。
+ * アプリプレビュー（.markdown-preview.prose）に近い読みやすさを localhost viewer でも再現する。
+ */
+
+.prose {
+  color: var(--foreground);
+  line-height: 1.75;
+  font-size: 1rem;
+}
+
+.prose > :first-child {
+  margin-top: 0;
+}
+
+.prose > :last-child {
+  margin-bottom: 0;
+}
+
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4,
+.prose h5,
+.prose h6 {
+  color: var(--foreground);
+  font-weight: 600;
+  line-height: 1.25;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+}
+
+.prose h1 { font-size: 2em; }
+.prose h2 { font-size: 1.5em; }
+.prose h3 { font-size: 1.25em; }
+.prose h4 { font-size: 1.125em; }
+
+.prose p,
+.prose ul,
+.prose ol,
+.prose blockquote,
+.prose pre,
+.prose table,
+.prose .md-table-wrap,
+.prose .md-mermaid,
+.prose .md-code-block,
+.prose .md-callout {
+  margin-top: 1em;
+  margin-bottom: 1em;
+}
+
+.prose ul,
+.prose ol {
+  padding-left: 1.5em;
+}
+
+.prose li {
+  margin-top: 0.25em;
+  margin-bottom: 0.25em;
+}
+
+.prose li > ul,
+.prose li > ol {
+  margin-top: 0.25em;
+  margin-bottom: 0.25em;
+}
+
+.prose blockquote {
+  border-left: 0.25rem solid var(--border);
+  padding-left: 1em;
+  color: color-mix(in oklab, var(--foreground) 78%, var(--muted-foreground));
+  font-style: italic;
+}
+
+.prose hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 2em 0;
+}
+
+.prose a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.prose a:hover {
+  opacity: 0.85;
+}
+
+.prose strong {
+  font-weight: 600;
+}
+
+.prose :is(p, li, td, th, blockquote, h1, h2, h3, h4, h5, h6) > code {
+  background: color-mix(in oklab, var(--muted) 82%, var(--background));
+  border: 1px solid color-mix(in oklab, var(--border) 86%, var(--background));
+  border-radius: 0.38rem;
+  padding: 0.1em 0.38em;
+  font-size: 0.9em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+/* h5/h6・em/del・タスク・脚注は shared/md-markdown-extras.css */
+
+.prose .md-code-block,
+.prose .md-mermaid {
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.prose pre:not(.md-code-block pre):not(.mermaid) {
+  overflow-x: auto;
+  padding: 0.75rem 1rem;
+  border-radius: 0.375rem;
+  background: color-mix(in oklab, var(--foreground) 8%, var(--background));
+}
+
+.prose code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+}

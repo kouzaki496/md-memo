@@ -22,6 +22,7 @@ export const editorShortcutConfig = {
   boldToggle: { key: "b", requireMod: true, shift: false, alt: false } as KeyShortcut,
   headingShortcutKeys: ["1", "2", "3", "4", "5", "6"] as const,
   listCycle: { key: "l", requireMod: true, shift: false, alt: false } as KeyShortcut,
+  insertTable: { key: "t", requireMod: true, shift: false, alt: false } as KeyShortcut,
   clearMarkdown: { key: "k", requireMod: true, shift: true, alt: false } as KeyShortcut,
   selectNextOccurrence: { key: "d", requireMod: false, shift: false, alt: true } as KeyShortcut,
   listIndentKey: "Tab",

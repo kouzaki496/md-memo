@@ -140,7 +140,7 @@ async fn build_viewer_html_from_markdown(body: &str, state: &AppPresentation) ->
     } else {
         html
     };
-    preview_render::highlight_code_blocks_in_html(&html)
+    preview_render::finalize_viewer_html(&html)
 }
 
 async fn note_body_to_viewer_html(body: &str, state: &AppPresentation) -> String {

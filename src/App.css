@@ -5,6 +5,7 @@
 @import "@fontsource-variable/noto-sans";
 @import "@fontsource-variable/playfair-display";
 @import "../shared/md-callout.css";
+@import "../shared/md-markdown-extras.css";
 @import "../shared/theme-presets.css";
 
 @custom-variant dark (&:is(.dark *));
@@ -141,15 +142,6 @@
   border-radius: 0.65rem;
   padding: 0.95rem 1.1rem;
   border: 1px solid transparent;
-}
-
-.markdown-preview .md-callout__icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 0;
-  margin-top: 0.18rem;
-  flex: 0 0 auto;
 }
 
 .markdown-preview .md-callout__body {

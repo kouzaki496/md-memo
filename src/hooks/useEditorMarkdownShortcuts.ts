@@ -11,6 +11,7 @@ import {
   applyClearMarkdown,
   applyEnterListContinuation,
   applyHeading,
+  applyInsertTable,
   applyListIndent,
   applyListTransform,
   detectListKind,
@@ -196,6 +197,13 @@ export function useEditorMarkdownShortcuts(options: UseEditorMarkdownShortcutsOp
         const currentIndex = currentKind == null ? -1 : cycle.indexOf(currentKind);
         const nextKind = cycle[(currentIndex + 1) % cycle.length];
         const res = applyListTransform(text, start, end, nextKind);
+        applyEditorTextAndSelection(textarea, res.text, res.selectionStart, res.selectionEnd);
+        return;
+      }
+
+      if (!e.nativeEvent.isComposing && matchesShortcut(e, editorShortcutConfig.insertTable)) {
+        e.preventDefault();
+        const res = applyInsertTable(text, start, end);
         applyEditorTextAndSelection(textarea, res.text, res.selectionStart, res.selectionEnd);
         return;
       }

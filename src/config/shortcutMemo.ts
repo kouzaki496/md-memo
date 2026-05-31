@@ -33,6 +33,7 @@ ${formatBuiltinTagsLine(BUILTIN_TAGS_SHORTCUTS)}
 
 ## 書式
 - \`${fmtShortcut(editorShortcutConfig.boldToggle.key)}\`: 太字
+- \`${fmtShortcut(editorShortcutConfig.insertTable.key)}\`: GFM テーブルを挿入
 - \`Ctrl/Cmd + Shift + ${editorShortcutConfig.clearMarkdown.key.toUpperCase()}\`: 選択範囲の Markdown 記法を外してプレーン化
 ${headingKeys}
 

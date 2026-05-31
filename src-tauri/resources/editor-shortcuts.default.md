@@ -13,6 +13,7 @@ tags: _builtin, shortcuts
 
 ## 書式
 - `Ctrl/Cmd + B`: 太字
+- `Ctrl/Cmd + T`: GFM テーブルを挿入
 - `Ctrl/Cmd + Shift + K`: 選択範囲の Markdown 記法を外してプレーン化
 - `Ctrl/Cmd + 1`: 見出し h1（同じレベルで解除）
 - `Ctrl/Cmd + 2`: 見出し h2（同じレベルで解除）

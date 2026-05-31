@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "::: note / note:: 記法のパースと callout HTML 出力の FE↔Rust 共有契約。色値は shared/md-callout.css が正。",
+  "description": "::: note / note:: 記法のパースと callout HTML 出力の FE↔Rust 共有契約。色値は shared/md-callout.css、アイコン SVG は shared/callout-icon-*.svg が正。",
   "constants": {
     "kinds": ["info", "warn", "alert", "tip"],
     "defaultKind": "info",
@@ -64,17 +64,17 @@
     {
       "id": "block-warn",
       "markdown": "::: note warn\nbe careful\n:::",
-      "contains": ["md-callout--warn", "be careful", "注意"]
+      "contains": ["md-callout--warn", "be careful", "md-callout__icon"]
     },
     {
       "id": "single-tip",
       "markdown": "note::tip Remember",
-      "contains": ["md-callout--tip", "Remember", "ヒント"]
+      "contains": ["md-callout--tip", "Remember", "md-callout__icon"]
     },
     {
       "id": "block-info-no-kind",
       "markdown": "::: note\nhello\n:::",
-      "contains": ["md-callout--info", "hello", "情報"]
+      "contains": ["md-callout--info", "hello", "md-callout__icon"]
     }
   ]
 }

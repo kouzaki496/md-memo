@@ -315,3 +315,30 @@ export function applyEnterListContinuation(
 }
 
 export { getSelectedLineBlockBounds };
+
+export const DEFAULT_TABLE_SNIPPET = `| 列1 | 列2 | 列3 |
+| --- | --- | --- |
+|  |  |  |
+|  |  |  |
+`;
+
+const DEFAULT_TABLE_FIRST_HEADER = "列1";
+
+export function applyInsertTable(text: string, start: number, end: number): TextEditResult {
+  let prefix = "";
+  let suffix = "";
+  if (start > 0 && text[start - 1] !== "\n") prefix = "\n";
+  if (end < text.length && text[end] !== "\n") suffix = "\n";
+
+  const snippet = DEFAULT_TABLE_SNIPPET;
+  const nextText = `${text.slice(0, start)}${prefix}${snippet}${suffix}${text.slice(end)}`;
+  const tableStart = start + prefix.length;
+  const headerStart = tableStart + 2;
+  const headerEnd = headerStart + DEFAULT_TABLE_FIRST_HEADER.length;
+
+  return {
+    text: nextText,
+    selectionStart: headerStart,
+    selectionEnd: headerEnd,
+  };
+}

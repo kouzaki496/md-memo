@@ -2,9 +2,13 @@ const VIEWER_THEME_BASE_CSS: &str = include_str!("../../../shared/theme-viewer-b
 const THEME_PRESETS_CSS: &str = include_str!("../../../shared/theme-presets.css");
 const VIEWER_LAYOUT_CSS: &str = include_str!("viewer.css");
 const MD_CALLOUT_CSS: &str = include_str!("../../../shared/md-callout.css");
+const MD_MARKDOWN_EXTRAS_CSS: &str = include_str!("../../../shared/md-markdown-extras.css");
+const MD_PROSE_VIEWER_CSS: &str = include_str!("../../../shared/md-prose-viewer.css");
 
 fn viewer_stylesheet() -> String {
-    format!("{VIEWER_THEME_BASE_CSS}\n{THEME_PRESETS_CSS}\n{MD_CALLOUT_CSS}\n{VIEWER_LAYOUT_CSS}")
+    format!(
+        "{VIEWER_THEME_BASE_CSS}\n{THEME_PRESETS_CSS}\n{MD_CALLOUT_CSS}\n{MD_MARKDOWN_EXTRAS_CSS}\n{MD_PROSE_VIEWER_CSS}\n{VIEWER_LAYOUT_CSS}"
+    )
 }
 
 pub(super) fn not_found_html() -> String {
@@ -30,6 +34,7 @@ pub(super) fn viewer_html(token: &str) -> String {
 <body>
   <header id="hdr">読み込み中…</header>
   <main id="main" class="prose"><p>読み込み中…</p></main>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11.15.0/dist/mermaid.min.js"></script>
   <script>
     const TOKEN = {token_json};
     let hdr = document.getElementById("hdr");
@@ -59,6 +64,7 @@ pub(super) fn viewer_html(token: &str) -> String {
     }}
 
     function applyTheme(s) {{
+      const wasDark = document.documentElement.classList.contains("dark");
       const mode = s.themeMode || "system";
       const preset = s.themePreset || "default";
       const root = document.documentElement;
@@ -73,6 +79,57 @@ pub(super) fn viewer_html(token: &str) -> String {
       if (mode === "system") {{
         systemThemeMedia = window.matchMedia("(prefers-color-scheme: dark)");
         systemThemeMedia.addEventListener("change", onSystemThemeChange);
+      }}
+
+      const isDark = root.classList.contains("dark");
+      if (wasDark !== isDark && lastSnapshot?.bodyHtml?.includes("md-mermaid")) {{
+        main.innerHTML = lastSnapshot.bodyHtml;
+        requestAnimationFrame(() => {{ void renderMermaid(); }});
+      }}
+    }}
+
+    async function mermaidReady() {{
+      if (window.mermaid) return window.mermaid;
+      if (!window.__mermaidReadyPromise) {{
+        window.__mermaidReadyPromise = new Promise((resolve, reject) => {{
+          const script = document.querySelector('script[src*="mermaid"]');
+          if (!script) {{
+            reject(new Error("Mermaid script tag missing"));
+            return;
+          }}
+          const done = () => {{
+            if (window.mermaid) resolve(window.mermaid);
+            else reject(new Error("Mermaid failed to initialize"));
+          }};
+          if (script.dataset.loaded === "true" || window.mermaid) {{
+            script.dataset.loaded = "true";
+            done();
+            return;
+          }}
+          script.addEventListener("load", () => {{
+            script.dataset.loaded = "true";
+            done();
+          }}, {{ once: true }});
+          script.addEventListener("error", () => reject(new Error("Mermaid script load failed")), {{ once: true }});
+        }});
+      }}
+      return window.__mermaidReadyPromise;
+    }}
+
+    async function renderMermaid() {{
+      const nodes = main.querySelectorAll(".md-mermaid pre.mermaid");
+      if (!nodes.length) return;
+      try {{
+        const mermaid = await mermaidReady();
+        const isDark = document.documentElement.classList.contains("dark");
+        mermaid.initialize({{
+          startOnLoad: false,
+          theme: isDark ? "dark" : "default",
+          securityLevel: "strict",
+        }});
+        await mermaid.run({{ nodes: Array.from(nodes) }});
+      }} catch (err) {{
+        console.error("Mermaid render failed:", err);
       }}
     }}
 
@@ -109,6 +166,7 @@ pub(super) fn viewer_html(token: &str) -> String {
       hdr.textContent = "提示中: " + s.fileName;
       if (bodyChanged || displayChanged) {{
         main.innerHTML = s.bodyHtml || "<p>（空）</p>";
+        requestAnimationFrame(() => {{ void renderMermaid(); }});
       }}
       if (displayChanged) {{
         lastDisplayedKey = displayKey;
@@ -158,6 +216,10 @@ mod tests {
         assert!(html.contains("--md-callout-info-bg"));
         assert!(html.contains("html[data-theme-preset=\"sepia\"]"));
         assert!(html.contains(".md-callout--info"));
+        assert!(html.contains("mermaid.min.js"));
+        assert!(html.contains("mermaidReady"));
+        assert!(html.contains(".prose h1"));
+        assert!(html.contains("md-table-wrap"));
     }
 
     #[test]

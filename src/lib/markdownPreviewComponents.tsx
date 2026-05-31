@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { Components } from "react-markdown";
 import { MarkdownCodeBlock } from "@/components/app/MarkdownCodeBlock";
+import { MarkdownMermaid } from "@/components/app/MarkdownMermaid";
 import { MarkdownPreviewImage } from "@/components/app/MarkdownPreviewImage";
 import { highlightReactChildren } from "@/lib/searchHighlight";
 import type { ParsedBodyTerm } from "@/lib/searchQueryParse";
@@ -33,6 +34,12 @@ function wrapHighlightChildren(children: ReactNode, terms: ParsedBodyTerm[] | un
   return highlightReactChildren(children, terms);
 }
 
+function isMermaidLanguage(language?: string): boolean {
+  if (!language) return false;
+  const lower = language.toLowerCase();
+  return lower === "mermaid" || lower === "mmd";
+}
+
 export function createMarkdownPreviewComponents(
   options: PreviewComponentsOptions = {}
 ): Partial<Components> {
@@ -53,6 +60,10 @@ export function createMarkdownPreviewComponents(
             {children}
           </code>
         );
+      }
+
+      if (isMermaidLanguage(match?.[1])) {
+        return <MarkdownMermaid chart={code} />;
       }
 
       return <MarkdownCodeBlock language={match?.[1]}>{code}</MarkdownCodeBlock>;
@@ -103,6 +114,13 @@ export function createMarkdownPreviewComponents(
     },
     h6({ children, ...props }) {
       return <h6 {...props}>{wrapHighlightChildren(children, highlightTerms)}</h6>;
+    },
+    table({ children, ...props }) {
+      return (
+        <div className="md-table-wrap not-prose">
+          <table {...props}>{children}</table>
+        </div>
+      );
     },
     td({ children, ...props }) {
       return <td {...props}>{wrapHighlightChildren(children, highlightTerms)}</td>;

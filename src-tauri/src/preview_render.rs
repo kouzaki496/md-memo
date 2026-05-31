@@ -34,12 +34,12 @@ impl CalloutKind {
         }
     }
 
-    fn label(self) -> &'static str {
+    fn icon_svg(self) -> &'static str {
         match self {
-            Self::Info => "情報",
-            Self::Warn => "注意",
-            Self::Alert => "警告",
-            Self::Tip => "ヒント",
+            Self::Info => include_str!("../../shared/callout-icon-info.svg"),
+            Self::Warn => include_str!("../../shared/callout-icon-warn.svg"),
+            Self::Alert => include_str!("../../shared/callout-icon-alert.svg"),
+            Self::Tip => include_str!("../../shared/callout-icon-tip.svg"),
         }
     }
 }
@@ -64,6 +64,8 @@ static RE_TASK_LIST: LazyLock<Regex> =
 static RE_PRE_CODE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?s)<pre><code(?: class="language-([^"]*)")?>(.*?)</code></pre>"#).unwrap()
 });
+static RE_TABLE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)<table(\s[^>]*)?>(.*?)</table>").unwrap());
 static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
 static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
 
@@ -220,7 +222,8 @@ fn markdown_fragment_to_html(md: &str) -> String {
     options.insert(
         Options::ENABLE_STRIKETHROUGH
             | Options::ENABLE_TABLES
-            | Options::ENABLE_TASKLISTS,
+            | Options::ENABLE_TASKLISTS
+            | Options::ENABLE_FOOTNOTES,
     );
     let parser = Parser::new_ext(&md, options);
     let mut html_out = String::new();
@@ -231,9 +234,9 @@ fn markdown_fragment_to_html(md: &str) -> String {
 fn render_callout(kind: CalloutKind, content: &str) -> String {
     let body = markdown_fragment_to_html(content);
     format!(
-        r#"<div class="md-callout md-callout--{class}" role="note"><span class="md-callout__label">{label}</span><div class="md-callout__body">{body}</div></div>"#,
+        r#"<div class="md-callout md-callout--{class}" role="note"><span class="md-callout__icon" aria-hidden="true">{icon}</span><div class="md-callout__body">{body}</div></div>"#,
         class = kind.css_class(),
-        label = kind.label(),
+        icon = kind.icon_svg(),
         body = if body.is_empty() { String::new() } else { body },
     )
 }
@@ -322,13 +325,27 @@ fn normalize_lang(lang: &str) -> String {
     }
 }
 
-/// 提示 HTML 内の `<pre><code>` を syntect でハイライトする（常にダーク背景）。
+fn is_mermaid_lang(lang: &str) -> bool {
+    matches!(lang.to_lowercase().as_str(), "mermaid" | "mmd")
+}
+
+fn escape_html_text(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+/// 提示 HTML 内の `<pre><code>` を syntect でハイライトする（常にダーク背景）。mermaid は描画用マークアップに差し替える。
 pub fn highlight_code_blocks_in_html(html: &str) -> String {
     let theme = pick_theme();
     RE_PRE_CODE
         .replace_all(html, |caps: &regex::Captures| {
             let lang = caps.get(1).map(|m| m.as_str()).unwrap_or("");
             let code = decode_html_entities(&caps[2]);
+            if is_mermaid_lang(lang) {
+                let escaped = escape_html_text(&code);
+                return format!(r#"<div class="md-mermaid"><pre class="mermaid">{escaped}</pre></div>"#);
+            }
             let normalized = normalize_lang(lang);
             let syntax = SYNTAX_SET
                 .find_syntax_by_token(&normalized)
@@ -342,6 +359,25 @@ pub fn highlight_code_blocks_in_html(html: &str) -> String {
         .into_owned()
 }
 
+/// GFM テーブルをアプリプレビューと同じ `.md-table-wrap` で囲む。
+pub fn wrap_tables_in_html(html: &str) -> String {
+    if !html.contains("<table") || html.contains("md-table-wrap") {
+        return html.to_string();
+    }
+    RE_TABLE
+        .replace_all(html, |caps: &regex::Captures| {
+            let attrs = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            let body = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+            format!(r#"<div class="md-table-wrap"><table{attrs}>{body}</table></div>"#)
+        })
+        .into_owned()
+}
+
+/// 提示 viewer 向けにコードハイライト・Mermaid マークアップ・テーブルラップを適用する。
+pub fn finalize_viewer_html(html: &str) -> String {
+    wrap_tables_in_html(&highlight_code_blocks_in_html(html))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -351,6 +387,8 @@ mod tests {
         let md = "before\n::: note warn\nline1\nline2\n:::\nafter";
         let html = render_note_body_html(md);
         assert!(html.contains("md-callout--warn"));
+        assert!(html.contains("md-callout__icon"));
+        assert!(!html.contains("md-callout__label"));
         assert!(html.contains("line1"));
         assert!(html.contains("before"));
         assert!(html.contains("after"));
@@ -395,5 +433,55 @@ mod tests {
         let highlighted = highlight_code_blocks_in_html(&html);
         assert!(highlighted.contains("md-code-block"));
         assert!(highlighted.contains("fn") && highlighted.contains("main"));
+    }
+
+    #[test]
+    fn gfm_table_renders() {
+        let md = "| A | B |\n|---|---|\n| 1 | 2 |";
+        let html = markdown_fragment_to_html(md);
+        assert!(html.contains("<table"));
+        assert!(html.contains("<th") || html.contains("<td"));
+    }
+
+    #[test]
+    fn gfm_task_list_renders_checkbox() {
+        let html = markdown_fragment_to_html("- [x] done\n- [ ] todo");
+        assert!(html.contains("checkbox"));
+    }
+
+    #[test]
+    fn gfm_footnote_renders() {
+        let html = markdown_fragment_to_html("Text[^note]\n\n[^note]: Footnote body");
+        assert!(
+            html.contains("footnote") || html.contains("Footnote body"),
+            "expected footnote html, got {html}"
+        );
+    }
+
+    #[test]
+    fn mermaid_fence_becomes_diagram_markup() {
+        let html = markdown_fragment_to_html("```mermaid\ngraph LR\n  A --> B\n```");
+        let highlighted = highlight_code_blocks_in_html(&html);
+        assert!(highlighted.contains("md-mermaid"));
+        assert!(highlighted.contains(r#"<pre class="mermaid">"#));
+        assert!(highlighted.contains("graph LR"));
+        assert!(!highlighted.contains("md-code-block"));
+    }
+
+    #[test]
+    fn wrap_tables_adds_scroll_container() {
+        let html = markdown_fragment_to_html("| A | B |\n|---|---|\n| 1 | 2 |");
+        let wrapped = wrap_tables_in_html(&html);
+        assert!(wrapped.contains("md-table-wrap"));
+        assert!(wrapped.contains("<table"));
+    }
+
+    #[test]
+    fn finalize_viewer_html_applies_table_and_mermaid() {
+        let md = "| X |\n|---|\n| 1 |\n\n```mermaid\ngraph TD\n  A --> B\n```";
+        let body = render_note_body_html(md);
+        let final_html = finalize_viewer_html(&body);
+        assert!(final_html.contains("md-table-wrap"));
+        assert!(final_html.contains("md-mermaid"));
     }
 }

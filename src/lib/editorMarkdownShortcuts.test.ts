@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyBoldToggle,
+  applyInsertTable,
   applyListTransform,
   detectListKind,
   findNextOccurrence,
@@ -42,5 +43,33 @@ describe("findNextOccurrence", () => {
     const text = "foo bar foo";
     const next = findNextOccurrence(text, 0, 3);
     expect(next).toEqual({ selectionStart: 8, selectionEnd: 11 });
+  });
+});
+
+describe("applyInsertTable", () => {
+  it("inserts a GFM table and selects the first header cell", () => {
+    const res = applyInsertTable("hello", 5, 5);
+    expect(res.text).toContain("| 列1 | 列2 | 列3 |");
+    expect(res.text).toContain("| --- | --- | --- |");
+    expect(res.text.slice(res.selectionStart, res.selectionEnd)).toBe("列1");
+  });
+
+  it("adds a trailing newline before the next line when needed", () => {
+    const res = applyInsertTable("line one\nline two", 8, 8);
+    expect(res.text).toBe(
+      "line one\n| 列1 | 列2 | 列3 |\n| --- | --- | --- |\n|  |  |  |\n|  |  |  |\n\nline two"
+    );
+  });
+
+  it("adds blank lines when inserting mid-paragraph", () => {
+    const res = applyInsertTable("line one line two", 8, 8);
+    expect(res.text).toContain("line one\n| 列1");
+    expect(res.text).toContain("|  |  |  |\n\n line two");
+  });
+
+  it("replaces selected text with a table", () => {
+    const res = applyInsertTable("remove me", 0, 9);
+    expect(res.text.startsWith("| 列1 |")).toBe(true);
+    expect(res.text).not.toContain("remove me");
   });
 });
