@@ -1,6 +1,12 @@
 import { normalizeNotePath } from "@/lib/notePath";
 import { isSystemNotePath } from "@/lib/systemNotes";
 import type { NoteDetail, NoteMeta, SearchHit } from "@/types/note";
+import { isFuzzySearchHit } from "@/types/note";
+
+/** 一覧管理の 1 行（検索中の fuzzy ヒット表示用） */
+export type ManagerNoteRow = NoteDetail & {
+  searchFuzzy?: boolean;
+};
 
 function basename(path: string): string {
   const parts = normalizeNotePath(path).split("/");
@@ -70,14 +76,34 @@ export function findNoteDetailForHit(
   return undefined;
 }
 
+/** あいまいヒットした path（ヒット path と解決後 detail path の両方） */
+export function fuzzyPathsFromSearchHits(
+  noteDetails: NoteDetail[],
+  notes: NoteMeta[],
+  hits: SearchHit[]
+): Set<string> {
+  const out = new Set<string>();
+  for (const hit of hits) {
+    if (!isFuzzySearchHit(hit)) continue;
+    out.add(normalizeNotePath(hit.path));
+    const detail = findNoteDetailForHit(noteDetails, notes, hit.path, hit);
+    if (detail) {
+      out.add(normalizeNotePath(detail.path));
+    }
+  }
+  return out;
+}
+
 /** 検索ヒット順に NoteDetail を並べる（ヒット 1 件 = メモ 1 行） */
 export function noteDetailsFromSearchHits(
   noteDetails: NoteDetail[],
   notes: NoteMeta[],
-  hits: SearchHit[]
-): NoteDetail[] {
-  const out: NoteDetail[] = [];
+  hits: SearchHit[],
+  fuzzyPaths?: Set<string>
+): ManagerNoteRow[] {
+  const out: ManagerNoteRow[] = [];
   const seen = new Set<string>();
+  const fuzzy = fuzzyPaths ?? fuzzyPathsFromSearchHits(noteDetails, notes, hits);
 
   for (const hit of hits) {
     const key = normalizeNotePath(hit.path);
@@ -86,7 +112,10 @@ export function noteDetailsFromSearchHits(
 
     const detail = findNoteDetailForHit(noteDetails, notes, hit.path, hit);
     if (detail) {
-      out.push(detail);
+      out.push({
+        ...detail,
+        searchFuzzy: fuzzy.has(normalizeNotePath(detail.path)),
+      });
     }
   }
 

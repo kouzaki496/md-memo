@@ -104,8 +104,9 @@ export const messages = {
     newMemo: "新規メモ",
     manager: "一覧管理",
     settings: "設定",
-    searchPlaceholder: "メモを検索…（#タグ / #タグ 語 でタグ+本文）",
+    searchPlaceholder: "メモを検索…（#タグ / \"完全一致\" / 本文はあいまい）",
     searchNoResults: "一致するメモはありません",
+    searchSearching: "検索中…",
     searchViewInManager: (remaining: number) =>
       remaining > 0
         ? `他 ${remaining} 件 — 一覧管理で見る`
@@ -124,6 +125,11 @@ export const messages = {
     presentingOpenNote: "メモを開く",
     presentingCount: (n: number) => `${n} 件`,
     lineHit: (line: number, text: string) => `${line} 行目: ${text}`,
+  },
+
+  search: {
+    fuzzyBadge: "？",
+    fuzzyBadgeTitle: "入力に近い語・誤字でヒットしました",
   },
 
   editor: {
@@ -184,7 +190,7 @@ export const messages = {
 
   manager: {
     title: "メモ一覧管理",
-    searchPlaceholder: "本文で検索（#タグ / #タグ 語 でタグ+本文）",
+    searchPlaceholder: "本文あいまい検索（#タグ / \"完全一致\"）",
     maxCharsPlaceholder: "最大文字数（例: 100）",
     selectAll: "表示中を全選択",
     clearSelection: "選択解除",

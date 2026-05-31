@@ -6,18 +6,13 @@ import {
   type ReactNode,
 } from "react";
 import type { SearchMode } from "@/types/note";
+import type { ParsedBodyTerm } from "@/lib/searchQueryParse";
+import { fuzzyWordHighlightRanges } from "@/lib/fuzzyMatch";
 
-const HIGHLIGHT_MARK_CLASS =
+export { parseBodyHighlightTerms } from "@/lib/searchQueryParse";
+
+export const SEARCH_HIGHLIGHT_CLASS =
   "rounded bg-amber-200/80 px-0.5 text-foreground dark:bg-amber-500/40";
-
-/** Rust `parse_query` と同様、`#` 始まり以外を本文ハイライト語とする */
-export function parseBodyHighlightTerms(query: string): string[] {
-  return query
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .filter((term) => !term.startsWith("#"));
-}
 
 export function isSearchHighlightActive(mode: SearchMode, query: string): boolean {
   if (!query.trim()) return false;
@@ -32,28 +27,31 @@ function findCaseInsensitiveIndex(text: string, needle: string, from: number): n
   return text.toLowerCase().indexOf(needle.toLowerCase(), from);
 }
 
-function collectHighlightRanges(
+function collectSubstringRanges(
   text: string,
-  terms: string[]
+  term: string
 ): Array<{ start: number; end: number }> {
   const ranges: Array<{ start: number; end: number }> = [];
-  for (const term of terms) {
-    if (!term) continue;
-    const caseSensitive = termIsCaseSensitive(term);
-    let from = 0;
-    while (from < text.length) {
-      const index = caseSensitive
-        ? text.indexOf(term, from)
-        : findCaseInsensitiveIndex(text, term, from);
-      if (index === -1) break;
-      ranges.push({ start: index, end: index + term.length });
-      from = index + term.length;
-    }
+  const caseSensitive = termIsCaseSensitive(term);
+  let from = 0;
+  while (from < text.length) {
+    const index = caseSensitive
+      ? text.indexOf(term, from)
+      : findCaseInsensitiveIndex(text, term, from);
+    if (index === -1) break;
+    ranges.push({ start: index, end: index + term.length });
+    from = index + term.length;
   }
+  return ranges;
+}
 
-  ranges.sort((a, b) => a.start - b.start || b.end - a.end);
+function mergeHighlightRanges(
+  ranges: Array<{ start: number; end: number }>
+): Array<{ start: number; end: number }> {
+  if (ranges.length === 0) return [];
+  const sorted = [...ranges].sort((a, b) => a.start - b.start || b.end - a.end);
   const merged: Array<{ start: number; end: number }> = [];
-  for (const range of ranges) {
+  for (const range of sorted) {
     const last = merged[merged.length - 1];
     if (last && range.start <= last.end) {
       last.end = Math.max(last.end, range.end);
@@ -64,7 +62,22 @@ function collectHighlightRanges(
   return merged;
 }
 
-function highlightPlainText(text: string, terms: string[]): ReactNode {
+function collectHighlightRanges(
+  text: string,
+  terms: ParsedBodyTerm[]
+): Array<{ start: number; end: number }> {
+  const ranges: Array<{ start: number; end: number }> = [];
+  for (const term of terms) {
+    if (!term.text) continue;
+    ranges.push(...collectSubstringRanges(text, term.text));
+    if (!term.exact) {
+      ranges.push(...fuzzyWordHighlightRanges(text, term.text));
+    }
+  }
+  return mergeHighlightRanges(ranges);
+}
+
+function highlightPlainText(text: string, terms: ParsedBodyTerm[]): ReactNode {
   if (!terms.length || text.length === 0) return text;
 
   const ranges = collectHighlightRanges(text, terms);
@@ -77,7 +90,7 @@ function highlightPlainText(text: string, terms: string[]): ReactNode {
       parts.push(text.slice(cursor, range.start));
     }
     parts.push(
-      <mark key={`hl-${index}-${range.start}`} className={HIGHLIGHT_MARK_CLASS}>
+      <mark key={`hl-${index}-${range.start}`} className={SEARCH_HIGHLIGHT_CLASS}>
         {text.slice(range.start, range.end)}
       </mark>
     );
@@ -101,7 +114,7 @@ function shouldSkipHighlightElement(element: ReactElement): boolean {
   return false;
 }
 
-export function highlightReactChildren(children: ReactNode, terms: string[]): ReactNode {
+export function highlightReactChildren(children: ReactNode, terms: ParsedBodyTerm[]): ReactNode {
   if (!terms.length) return children;
 
   return Children.map(children, (child) => {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   EMPTY_NOTE_SEARCH_STATE,
@@ -24,6 +24,7 @@ export function useNoteSearch(
   const onError = options?.onError;
   const enabled = options?.enabled ?? true;
   const [result, setResult] = useState<NoteSearchState>(EMPTY_NOTE_SEARCH_STATE);
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
     if (!enabled) {
@@ -32,10 +33,12 @@ export function useNoteSearch(
 
     const q = query.trim();
     if (!q) {
+      requestIdRef.current += 1;
       setResult(EMPTY_NOTE_SEARCH_STATE);
       return;
     }
 
+    const requestId = ++requestIdRef.current;
     let cancelled = false;
     setResult({
       ...EMPTY_NOTE_SEARCH_STATE,
@@ -45,12 +48,11 @@ export function useNoteSearch(
     const timer = window.setTimeout(() => {
       void invoke<SearchNotesResult>("search_notes", { query: q })
         .then((next) => {
-          if (!cancelled) {
-            setResult({ ...next, error: false, pending: false, searchedQuery: q });
-          }
+          if (cancelled || requestId !== requestIdRef.current) return;
+          setResult({ ...next, error: false, pending: false, searchedQuery: q });
         })
         .catch((err) => {
-          if (cancelled) return;
+          if (cancelled || requestId !== requestIdRef.current) return;
           console.error(err);
           setResult({
             ...EMPTY_NOTE_SEARCH_STATE,

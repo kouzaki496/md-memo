@@ -7,7 +7,7 @@ import { isSystemNoteFileName, isSystemNotePath } from "@/lib/systemNotes";
 import { formatAppError } from "@/lib/appError";
 import { messages } from "@/lib/messages";
 import { useNoteSearch } from "@/hooks/useNoteSearch";
-import { noteDetailsFromSearchHits } from "@/lib/managerSearchFilter";
+import { noteDetailsFromSearchHits, type ManagerNoteRow } from "@/lib/managerSearchFilter";
 import type { SearchHit } from "@/types/note";
 
 function isEditorShortcutsNote(n: NoteMeta): boolean {
@@ -79,10 +79,10 @@ export function useNotesData(notesInitEnabled: boolean) {
     [notes]
   );
 
-  const filteredDetails = useMemo(() => {
+  const filteredDetails = useMemo((): ManagerNoteRow[] => {
     const q = managerQuery.trim();
     const max = Number(maxChars);
-    let rows: NoteDetail[];
+    let rows: ManagerNoteRow[];
 
     if (q.length === 0) {
       rows = noteDetails;
@@ -178,9 +178,13 @@ export function useNotesData(notesInitEnabled: boolean) {
     }
     try {
       await loadNoteDetails();
-    } finally {
       setManagerDetailsReady(true);
       setIsManageMode(true);
+    } catch (err) {
+      console.error(err);
+      setStatus(formatAppError(err));
+      setManagerDetailsReady(false);
+      setIsManageMode(false);
     }
   };
 
@@ -238,8 +242,10 @@ export function useNotesData(notesInitEnabled: boolean) {
     searchResults: sidebarSearch.hits,
     searchMode: sidebarSearch.mode,
     searchError: sidebarSearch.error,
+    searchPending: sidebarSearch.pending,
     managerSearchError: managerSearch.error,
     managerSearchPending,
+    managerSearchMode: managerSearch.mode,
     status,
     setStatus,
     isManageMode,

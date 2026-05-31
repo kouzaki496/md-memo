@@ -9,7 +9,7 @@ import { FirstRunSetupDialog } from "@/components/app/FirstRunSetupDialog";
 import { SettingsPanel } from "@/components/app/SettingsPanel";
 import { ReadingEditorPane } from "@/components/app/ReadingEditorPane";
 import { Overlays } from "@/components/app/Overlays";
-import type { NoteMeta, ReplaceTagGloballyResult, SearchHit } from "@/types/note";
+import type { NoteMeta, ReplaceTagGloballyResult, SearchHit, SearchMode } from "@/types/note";
 import type { AppConfig } from "@/types/config";
 import { useNotesData } from "@/hooks/useNotesData";
 import { useHoverPreview } from "@/hooks/useHoverPreview";
@@ -59,11 +59,14 @@ type ContextMenuState = {
   y: number;
 };
 
+type PreviewSearchContext = { query: string; mode: SearchMode };
+
 function App() {
   const collapsedSidebarWidth = 72;
   const [input, setInput] = useState("");
   const [currentPath, setCurrentPath] = useState<string | null>(null);
   const [activeHit, setActiveHit] = useState<SearchHit | null>(null);
+  const [previewSearch, setPreviewSearch] = useState<PreviewSearchContext | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -119,6 +122,7 @@ function App() {
     searchResults,
     searchMode,
     searchError,
+    searchPending,
     status,
     setStatus,
     isManageMode,
@@ -135,6 +139,7 @@ function App() {
     filteredDetails,
     managerSearchError,
     managerSearchPending,
+    managerSearchMode,
     loadNotes,
     loadNoteDetails,
     toggleSelect,
@@ -427,7 +432,11 @@ function App() {
     })();
   };
 
-  const openNote = async (path: string, hit?: SearchHit) => {
+  const openNote = async (
+    path: string,
+    hit?: SearchHit,
+    highlight: PreviewSearchContext | null = null
+  ) => {
     if (!(await exitSettingsIfAllowed())) return;
     if (isEditMode) {
       await flushSave();
@@ -438,6 +447,7 @@ function App() {
       setCurrentPath(path);
       setInput(content);
       setActiveHit(hit ?? null);
+      setPreviewSearch(highlight);
       setIsEditMode(false);
       setIsManageMode(false);
       setStatus(messages.status.loaded);
@@ -1020,6 +1030,7 @@ function App() {
               searchResults={searchResults}
               searchMode={searchMode}
               searchError={searchError}
+              searchPending={searchPending}
               activeHit={activeHit}
               currentPath={currentPath}
               status={status}
@@ -1040,7 +1051,13 @@ function App() {
                 })();
               }}
               onOpenSettings={() => void openSettings()}
-              onOpenNote={(path, hit) => void openNote(path, hit)}
+              onOpenNote={(path, hit) =>
+                void openNote(
+                  path,
+                  hit,
+                  query.trim() ? { query, mode: searchMode } : null
+                )
+              }
               onOpenContextMenu={openContextMenu}
               onOpenContextMenuForPath={openContextMenuForPath}
               onOpenHoverPreview={openHoverPreview}
@@ -1049,7 +1066,7 @@ function App() {
               onCloseSidebar={() => setIsSidebarOpen(false)}
               activePresentations={activePresentations}
               presentedPaths={presentedPaths}
-              onOpenPresentedNote={(path) => void openNote(path)}
+              onOpenPresentedNote={(path) => void openNote(path, undefined, null)}
               onReopenPresentationTab={(status) => void handleShowPresentationInBrowser(status)}
             />
           </div>
@@ -1138,7 +1155,13 @@ function App() {
             onClose={closeManager}
             onDeleteSelected={() => void deleteSelected()}
             onToggleSelect={toggleSelect}
-            onOpenNote={(path) => void openNote(path)}
+            onOpenNote={(path) =>
+              void openNote(
+                path,
+                undefined,
+                managerQuery.trim() ? { query: managerQuery, mode: managerSearchMode } : null
+              )
+            }
             onOpenInNewWindow={handleOpenInNewWindow}
             onPinOrUnpin={(note) => void pinOrUnpinNote(note)}
             onDelete={(note) => void deleteNote(note)}
@@ -1160,7 +1183,7 @@ function App() {
             {!currentPresentation?.active && activePresentations.length > 0 && (
               <PresentationScopeHint
                 activePresentations={activePresentations}
-                onOpenPresentedNote={(path) => void openNote(path)}
+                onOpenPresentedNote={(path) => void openNote(path, undefined, null)}
               />
             )}
             <ReadingEditorPane
@@ -1185,8 +1208,8 @@ function App() {
               onPresentationPreviewScroll={
                 currentPresentation?.active ? handlePresentationPreviewScroll : undefined
               }
-              searchQuery={query}
-              searchMode={searchMode}
+              searchQuery={previewSearch?.query ?? ""}
+              searchMode={previewSearch?.mode ?? "body"}
               editorRef={editorRef}
             />
           </div>

@@ -60,6 +60,11 @@ export function isTagSearchHit(hit: SearchHit): boolean {
   return hit.mode === "tag";
 }
 
+/** typo 許容の fuzzy 本文語でヒットした（`SearchHit.score` が付与されている） */
+export function isFuzzySearchHit(hit: SearchHit): boolean {
+  return typeof hit.score === "number" && Number.isFinite(hit.score);
+}
+
 export type NoteDetail = {
   path: string;
   title: string;

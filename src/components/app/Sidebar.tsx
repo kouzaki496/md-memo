@@ -6,7 +6,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import type { PresentationStatus } from "@/types/presentation";
 import type { NoteMeta, SearchHit, SearchMode } from "@/types/note";
-import { isLineSearchHit, isMixedSearchMode, isTagSearchHit, isTagSearchMode } from "@/types/note";
+import { isLineSearchHit, isMixedSearchMode, isFuzzySearchHit, isTagSearchHit, isTagSearchMode } from "@/types/note";
+import { SearchFuzzyBadge } from "@/components/app/SearchMatchHint";
 import { INBOX_EXCLUSIVE_MESSAGE } from "@/lib/noteTags";
 import { messages } from "@/lib/messages";
 import { cn } from "@/lib/utils";
@@ -22,6 +23,7 @@ type SidebarProps = {
   searchResults: SearchHit[];
   searchMode: SearchMode;
   searchError: boolean;
+  searchPending: boolean;
   activeHit: SearchHit | null;
   currentPath: string | null;
   status: string;
@@ -50,6 +52,7 @@ export function Sidebar(props: SidebarProps) {
     searchResults,
     searchMode,
     searchError,
+    searchPending,
     activeHit,
     currentPath,
     status,
@@ -270,20 +273,25 @@ export function Sidebar(props: SidebarProps) {
                               activeHit.text === r.text
                           );
                       return (
-                        <button
+                        <div
                           key={`${r.path}:${r.line}:${r.text}`}
-                          type="button"
-                          className={`px-2 py-1 text-left text-xs rounded-md truncate transition-colors ${
+                          className={`flex min-w-0 items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors ${
                             isActive
                               ? "bg-muted text-foreground shadow-sm"
-                              : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                              : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                           }`}
-                          onClick={() => onOpenNote(r.path, lineHit ? r : undefined)}
                           onContextMenu={(e) => onOpenContextMenuForPath(e, r.path)}
-                          title={label}
                         >
-                          {label}
-                        </button>
+                          <button
+                            type="button"
+                            className="min-w-0 flex-1 truncate text-left"
+                            onClick={() => onOpenNote(r.path, lineHit ? r : undefined)}
+                            title={label}
+                          >
+                            {label}
+                          </button>
+                          {isFuzzySearchHit(r) && <SearchFuzzyBadge />}
+                        </div>
                       );
                     })}
                     {searchResults.length > SIDEBAR_SEARCH_PREVIEW_LIMIT && (
@@ -298,6 +306,8 @@ export function Sidebar(props: SidebarProps) {
                       </button>
                     )}
                   </div>
+                ) : searchPending ? (
+                  <div className="px-2 py-1 text-xs text-muted-foreground">{messages.sidebar.searchSearching}</div>
                 ) : searchError ? (
                   <div className="px-2 py-1 text-xs text-destructive">{messages.status.searchFailed}</div>
                 ) : (

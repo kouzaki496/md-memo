@@ -3,6 +3,7 @@ import type { Components } from "react-markdown";
 import { MarkdownCodeBlock } from "@/components/app/MarkdownCodeBlock";
 import { MarkdownPreviewImage } from "@/components/app/MarkdownPreviewImage";
 import { highlightReactChildren } from "@/lib/searchHighlight";
+import type { ParsedBodyTerm } from "@/lib/searchQueryParse";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 async function openLinkInSystemBrowser(href: string) {
@@ -24,10 +25,10 @@ function normalizeExternalBrowserHref(href: string): string | null {
 }
 
 type PreviewComponentsOptions = {
-  highlightTerms?: string[];
+  highlightTerms?: ParsedBodyTerm[];
 };
 
-function wrapHighlightChildren(children: ReactNode, terms: string[] | undefined) {
+function wrapHighlightChildren(children: ReactNode, terms: ParsedBodyTerm[] | undefined) {
   if (!terms?.length) return children;
   return highlightReactChildren(children, terms);
 }

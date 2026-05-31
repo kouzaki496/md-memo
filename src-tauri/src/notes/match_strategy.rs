@@ -1,14 +1,13 @@
-//! 検索語の一致戦略。あいまい検索は `LineTermMatcher` の追加実装で差し込む。
+//! 検索語の一致戦略。本文はデフォルト fuzzy、`"` 囲みは exact。
 
-/// 検索モード。コマンド引数化や設定連携は将来ここから拡張する。
+/// 全語 exact に強制するモード（テスト・後方互換用）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MatchMode {
     #[default]
     Exact,
-    // Fuzzy { threshold: f32 },
 }
 
-/// 本文行に対する語一致（部分一致）。
+/// 本文行に対する語一致。
 pub trait LineTermMatcher {
     fn matches_line(&self, line: &str, term: &str) -> bool;
 }
@@ -18,18 +17,68 @@ pub trait TagTermMatcher {
     fn matches_tag(&self, note_tag: &str, search_term: &str) -> bool;
 }
 
-/// 現在の exact 検索: 本文は部分一致、タグは大小区別なし完全一致。
+/// 本文 exact: 部分一致（語に大文字があれば大小区別）。
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ExactMatcher;
 
+/// 本文 fuzzy: 部分一致 or 編集距離（typo 許容）。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FuzzyMatcher;
+
+/// fuzzy を有効にする最小語長（これ未満は exact のみ）。
+pub const MIN_FUZZY_TERM_LEN: usize = 3;
+
+/// fuzzy ヒットとして採用する最低スコア（`1 - dist/max_len`）。
+pub const MIN_FUZZY_SCORE: f32 = 0.75;
+
+/// 長語向けの許容編集距離比率。
+pub const MAX_EDIT_RATIO: f32 = 0.34;
+
 impl LineTermMatcher for ExactMatcher {
-    /// 語に大文字が含まれる場合は大小区別、それ以外は大小区別なし。
     fn matches_line(&self, line: &str, term: &str) -> bool {
+        if term.is_empty() {
+            return false;
+        }
         if term.chars().any(|c| c.is_uppercase()) {
             line.contains(term)
         } else {
             line.to_lowercase().contains(&term.to_lowercase())
         }
+    }
+}
+
+impl FuzzyMatcher {
+    /// 1.0 = 部分一致、それ未満 = fuzzy。不一致は `None`。
+    pub fn match_score(&self, line: &str, term: &str) -> Option<f32> {
+        if term.is_empty() {
+            return None;
+        }
+        if ExactMatcher.matches_line(line, term) {
+            return Some(1.0);
+        }
+        // 大文字を含む語は exact のみ（fuzzy で別ケースへ広げない）
+        if term.chars().any(|c| c.is_uppercase()) {
+            return None;
+        }
+        if term.chars().count() < MIN_FUZZY_TERM_LEN {
+            return None;
+        }
+
+        let mut best: Option<f32> = None;
+
+        for word in split_words(line) {
+            if let Some(score) = fuzzy_word_score(word, term) {
+                best = Some(best.map_or(score, |b: f32| b.max(score)));
+            }
+        }
+
+        best
+    }
+}
+
+impl LineTermMatcher for FuzzyMatcher {
+    fn matches_line(&self, line: &str, term: &str) -> bool {
+        self.match_score(line, term).is_some()
     }
 }
 
@@ -39,18 +88,72 @@ impl TagTermMatcher for ExactMatcher {
     }
 }
 
-impl MatchMode {
-    pub fn line_matcher(self) -> ExactMatcher {
-        match self {
-            MatchMode::Exact => ExactMatcher,
+pub(crate) fn split_words(line: &str) -> impl Iterator<Item = &str> {
+    line.split(|c: char| c.is_whitespace() || c == '-' || c == '_' || c == '/')
+        .filter(|w| !w.is_empty())
+}
+
+fn fuzzy_word_score(word: &str, term: &str) -> Option<f32> {
+    let wl = word.to_lowercase();
+    let tl = term.to_lowercase();
+    fuzzy_word_score_inner(&wl, &tl)
+}
+
+fn max_allowed_edits(max_len: usize) -> usize {
+    if max_len < MIN_FUZZY_TERM_LEN {
+        return 0;
+    }
+    if max_len <= 4 {
+        return 1;
+    }
+    ((max_len as f32) * MAX_EDIT_RATIO).ceil() as usize
+}
+
+fn fuzzy_word_score_inner(word: &str, term: &str) -> Option<f32> {
+    let max_len = word.chars().count().max(term.chars().count());
+    if max_len == 0 {
+        return None;
+    }
+    let dist = levenshtein_chars(word, term);
+    let allowed = max_allowed_edits(max_len);
+    if dist <= allowed {
+        let score = 1.0 - (dist as f32 / max_len as f32);
+        if score >= MIN_FUZZY_SCORE {
+            Some(score)
+        } else {
+            None
         }
+    } else {
+        None
+    }
+}
+
+fn levenshtein_chars(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let n = a.len();
+    let m = b.len();
+    if n == 0 {
+        return m;
+    }
+    if m == 0 {
+        return n;
     }
 
-    pub fn tag_matcher(self) -> ExactMatcher {
-        match self {
-            MatchMode::Exact => ExactMatcher,
+    let mut prev: Vec<usize> = (0..=m).collect();
+    let mut curr = vec![0; m + 1];
+
+    for i in 1..=n {
+        curr[0] = i;
+        for j in 1..=m {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            curr[j] = (prev[j] + 1)
+                .min(curr[j - 1] + 1)
+                .min(prev[j - 1] + cost);
         }
+        std::mem::swap(&mut prev, &mut curr);
     }
+    prev[m]
 }
 
 pub(crate) fn all_terms_match_lines<M: LineTermMatcher>(
@@ -132,11 +235,33 @@ mod tests {
         ));
     }
 
-    /// あいまい検索（将来）: `FuzzyMatcher` 追加後に typo・部分スコアのケースをここへ
     #[test]
-    #[ignore = "fuzzy matcher not implemented"]
-    fn fuzzy_line_matcher_placeholder() {
-        let _m = ExactMatcher;
-        // TODO: "meetng" ~= "meeting" など
+    fn fuzzy_line_matcher_matches_typo() {
+        let m = FuzzyMatcher;
+        assert!(m.matches_line("weekly meeting notes", "meetng"));
+        assert!(!m.matches_line("weekly meeting notes", "meetngs"));
+    }
+
+    #[test]
+    fn fuzzy_line_matcher_short_term_requires_exact_substring() {
+        let m = FuzzyMatcher;
+        assert!(m.matches_line("go to it", "it"));
+        assert!(!m.matches_line("go to at", "it"));
+    }
+
+    #[test]
+    fn fuzzy_line_matcher_respects_case_when_term_has_uppercase() {
+        let m = FuzzyMatcher;
+        assert!(m.matches_line("Hello World", "Hello"));
+        assert!(!m.matches_line("hello world", "Hello"));
+    }
+
+    #[test]
+    fn fuzzy_score_is_lower_for_typo_than_exact() {
+        let m = FuzzyMatcher;
+        let exact = m.match_score("team meeting", "meeting").unwrap();
+        let typo = m.match_score("team meeting", "meetng").unwrap();
+        assert!((exact - 1.0).abs() < f32::EPSILON);
+        assert!(typo < exact);
     }
 }

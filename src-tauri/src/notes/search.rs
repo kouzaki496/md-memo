@@ -1,8 +1,7 @@
 //! メモ検索（タグ / 本文 AND）
 
 use super::match_strategy::{
-    all_terms_match_lines, all_terms_match_tags, ExactMatcher, LineTermMatcher, MatchMode,
-    TagTermMatcher,
+    all_terms_match_tags, ExactMatcher, FuzzyMatcher, LineTermMatcher, MatchMode, TagTermMatcher,
 };
 use super::search_cache::{collect_cached_markdown_paths, load_parsed_note, ParsedNote};
 use super::store::{file_timestamps_ms, resolve_notes_root};
@@ -14,13 +13,81 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-fn parse_search_terms(query: &str) -> Vec<String> {
-    query
-        .split_whitespace()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .collect()
+/// 本文検索語。`exact: true` は `"` 囲み or 全語 exact モード。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BodyTerm {
+    text: String,
+    exact: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RawTerm {
+    Tag(String),
+    Body(BodyTerm),
+}
+
+fn push_classified(out: &mut Vec<RawTerm>, text: &str, quoted: bool, force_all_exact: bool) {
+    let body_exact = quoted || force_all_exact;
+    if !quoted && !body_exact && text.starts_with('#') {
+        let tag = text.trim_start_matches('#').trim();
+        if !tag.is_empty() {
+            out.push(RawTerm::Tag(tag.to_string()));
+            return;
+        }
+    }
+    out.push(RawTerm::Body(BodyTerm {
+        text: text.to_string(),
+        exact: body_exact,
+    }));
+}
+
+/// 空白区切り + `"` … `"` フレーズ。未閉じ `"` は末尾まで exact 語として扱う。
+fn parse_raw_terms(query: &str, force_all_exact: bool) -> Vec<RawTerm> {
+    let mut out = Vec::new();
+    let chars: Vec<char> = query.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        while i < chars.len() && chars[i].is_whitespace() {
+            i += 1;
+        }
+        if i >= chars.len() {
+            break;
+        }
+        if chars[i] == '"' {
+            i += 1;
+            let start = i;
+            let mut closed = false;
+            while i < chars.len() {
+                if chars[i] == '"' {
+                    closed = true;
+                    let content: String = chars[start..i].iter().collect();
+                    i += 1;
+                    if !content.is_empty() {
+                        push_classified(&mut out, &content, true, force_all_exact);
+                    }
+                    break;
+                }
+                i += 1;
+            }
+            if !closed {
+                let content: String = chars[start..].iter().collect();
+                if !content.is_empty() {
+                    push_classified(&mut out, &content, true, force_all_exact);
+                }
+                break;
+            }
+        } else {
+            let start = i;
+            while i < chars.len() && !chars[i].is_whitespace() {
+                i += 1;
+            }
+            let word: String = chars[start..i].iter().collect();
+            if !word.is_empty() {
+                push_classified(&mut out, &word, false, force_all_exact);
+            }
+        }
+    }
+    out
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,13 +100,13 @@ enum QueryKind {
 struct ParsedQuery {
     kind: QueryKind,
     tag_terms: Vec<String>,
-    body_terms: Vec<String>,
+    body_terms: Vec<BodyTerm>,
 }
 
-/// `#` 始まりの語はタグ、それ以外は本文。両方あれば複合 AND。
-fn parse_query(query: &str) -> ParsedQuery {
-    let terms = parse_search_terms(query);
-    if terms.is_empty() {
+/// `#` 始まり（引用符外）の語はタグ、それ以外は本文。両方あれば複合 AND。
+fn parse_query(query: &str, force_all_exact: bool) -> ParsedQuery {
+    let raw = parse_raw_terms(query, force_all_exact);
+    if raw.is_empty() {
         return ParsedQuery {
             kind: QueryKind::Body,
             tag_terms: vec![],
@@ -49,14 +116,17 @@ fn parse_query(query: &str) -> ParsedQuery {
 
     let mut tag_terms = Vec::new();
     let mut body_terms = Vec::new();
-    for term in &terms {
-        if term.starts_with('#') {
-            let tag = term.trim_start_matches('#').trim();
-            if !tag.is_empty() {
-                tag_terms.push(tag.to_string());
+    let mut saw_hash_only = false;
+
+    for term in raw {
+        match term {
+            RawTerm::Tag(tag) => tag_terms.push(tag),
+            RawTerm::Body(body) => {
+                if body.text.starts_with('#') {
+                    saw_hash_only = true;
+                }
+                body_terms.push(body);
             }
-        } else {
-            body_terms.push(term.clone());
         }
     }
 
@@ -64,7 +134,7 @@ fn parse_query(query: &str) -> ParsedQuery {
         QueryKind::Mixed
     } else if !tag_terms.is_empty() {
         QueryKind::Tag
-    } else if terms.iter().any(|t| t.starts_with('#')) {
+    } else if saw_hash_only {
         QueryKind::Tag
     } else {
         QueryKind::Body
@@ -74,6 +144,73 @@ fn parse_query(query: &str) -> ParsedQuery {
         kind,
         tag_terms,
         body_terms,
+    }
+}
+
+struct SearchMatchCtx {
+    /// true = 全本文語を exact（`MatchMode::Exact` テスト用）
+    force_all_exact: bool,
+}
+
+fn body_term_matches(line: &str, term: &BodyTerm, ctx: &SearchMatchCtx) -> bool {
+    if term.exact || ctx.force_all_exact {
+        ExactMatcher.matches_line(line, &term.text)
+    } else {
+        FuzzyMatcher.matches_line(line, &term.text)
+    }
+}
+
+fn body_term_score(line: &str, term: &BodyTerm, ctx: &SearchMatchCtx) -> Option<f32> {
+    if term.exact || ctx.force_all_exact {
+        if ExactMatcher.matches_line(line, &term.text) {
+            Some(1.0)
+        } else {
+            None
+        }
+    } else {
+        FuzzyMatcher.match_score(line, &term.text)
+    }
+}
+
+fn all_body_terms_match(
+    lines: &[(usize, &String)],
+    terms: &[BodyTerm],
+    ctx: &SearchMatchCtx,
+) -> bool {
+    terms.iter().all(|term| {
+        lines
+            .iter()
+            .any(|(_, line)| body_term_matches(line, term, ctx))
+    })
+}
+
+fn compute_body_hit_score(
+    lines: &[(usize, &String)],
+    terms: &[BodyTerm],
+    ctx: &SearchMatchCtx,
+) -> Option<f32> {
+    if terms.is_empty() {
+        return None;
+    }
+    let use_fuzzy = !ctx.force_all_exact;
+    let mut min_score = 1.0f32;
+    let mut any_fuzzy = false;
+
+    for term in terms {
+        let best = lines
+            .iter()
+            .filter_map(|(_, line)| body_term_score(line, term, ctx))
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))?;
+        if use_fuzzy && !term.exact && best < 1.0 - f32::EPSILON {
+            any_fuzzy = true;
+        }
+        min_score = min_score.min(best);
+    }
+
+    if any_fuzzy {
+        Some(min_score)
+    } else {
+        None
     }
 }
 
@@ -95,33 +232,39 @@ fn tag_hit(path: String, text: String) -> SearchHit {
     }
 }
 
-fn body_hit(path: String, line: usize, text: String) -> SearchHit {
+fn body_hit(path: String, line: usize, text: String, score: Option<f32>) -> SearchHit {
     SearchHit {
         path,
         line,
         text,
         mode: SearchMode::Body,
-        score: None,
+        score,
     }
 }
 
-fn mixed_hit(path: String, line: usize, text: String) -> SearchHit {
+fn mixed_hit(path: String, line: usize, text: String, score: Option<f32>) -> SearchHit {
     SearchHit {
         path,
         line,
         text,
         mode: SearchMode::Mixed,
-        score: None,
+        score,
     }
 }
 
-fn sort_hits_by_recency(hits: &mut [SearchHit]) {
+fn sort_hits(hits: &mut [SearchHit]) {
     hits.sort_by(|a, b| {
-        let (au, ac) = file_timestamps_ms(Path::new(&a.path));
-        let (bu, bc) = file_timestamps_ms(Path::new(&b.path));
-        bu.cmp(&au)
-            .then_with(|| bc.cmp(&ac))
-            .then_with(|| a.path.cmp(&b.path))
+        let sa = a.score.unwrap_or(1.0);
+        let sb = b.score.unwrap_or(1.0);
+        sb.partial_cmp(&sa)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                let (au, ac) = file_timestamps_ms(Path::new(&a.path));
+                let (bu, bc) = file_timestamps_ms(Path::new(&b.path));
+                bu.cmp(&au)
+                    .then_with(|| bc.cmp(&ac))
+                    .then_with(|| a.path.cmp(&b.path))
+            })
     });
 }
 
@@ -150,14 +293,14 @@ fn search_by_tags(
             ))
         })
         .collect();
-    sort_hits_by_recency(&mut hits);
+    sort_hits(&mut hits);
     Ok(hits)
 }
 
 fn search_by_body(
     notes_root: &Path,
-    terms: &[String],
-    matcher: &ExactMatcher,
+    terms: &[BodyTerm],
+    ctx: &SearchMatchCtx,
 ) -> Result<Vec<SearchHit>, String> {
     let paths = collect_cached_markdown_paths(notes_root)?;
     let mut hits: Vec<SearchHit> = paths
@@ -165,46 +308,55 @@ fn search_by_body(
         .filter_map(|path| {
             let note = load_parsed_note(path).ok()?;
             let path_str = path.to_string_lossy().into_owned();
-            search_body_in_note(&path_str, &note, terms, matcher)
+            search_body_in_note(&path_str, &note, terms, ctx)
         })
         .collect();
-    sort_hits_by_recency(&mut hits);
+    sort_hits(&mut hits);
     Ok(hits)
 }
 
 fn search_by_mixed(
     notes_root: &Path,
     tag_terms: &[String],
-    body_terms: &[String],
-    tag_matcher: &ExactMatcher,
-    line_matcher: &ExactMatcher,
+    body_terms: &[BodyTerm],
+    ctx: &SearchMatchCtx,
 ) -> Result<Vec<SearchHit>, String> {
     let paths = collect_cached_markdown_paths(notes_root)?;
+    let tag_matcher = ExactMatcher;
     let mut hits: Vec<SearchHit> = paths
         .par_iter()
         .filter_map(|path| {
             let note = load_parsed_note(path).ok()?;
             let path_str = path.to_string_lossy().into_owned();
-            search_mixed_in_note(&path_str, &note, tag_terms, body_terms, tag_matcher, line_matcher)
+            search_mixed_in_note(&path_str, &note, tag_terms, body_terms, &tag_matcher, ctx)
         })
         .collect();
-    sort_hits_by_recency(&mut hits);
+    sort_hits(&mut hits);
     Ok(hits)
 }
 
 fn search_body_in_note(
     path_str: &str,
     note: &ParsedNote,
-    terms: &[String],
-    matcher: &ExactMatcher,
+    terms: &[BodyTerm],
+    ctx: &SearchMatchCtx,
 ) -> Option<SearchHit> {
     let searchable = searchable_lines(&note.lines);
-    if !all_terms_match_lines(matcher, &searchable, terms) {
+    if !all_body_terms_match(&searchable, terms, ctx) {
         return None;
     }
+    let score = compute_body_hit_score(&searchable, terms, ctx);
     searchable.into_iter().find_map(|(line_no, line)| {
-        if terms.iter().any(|t| matcher.matches_line(line, t)) {
-            Some(body_hit(path_str.to_string(), line_no, line.clone()))
+        if terms
+            .iter()
+            .any(|t| body_term_matches(line, t, ctx))
+        {
+            Some(body_hit(
+                path_str.to_string(),
+                line_no,
+                line.clone(),
+                score,
+            ))
         } else {
             None
         }
@@ -215,25 +367,31 @@ fn search_mixed_in_note(
     path_str: &str,
     note: &ParsedNote,
     tag_terms: &[String],
-    body_terms: &[String],
+    body_terms: &[BodyTerm],
     tag_matcher: &ExactMatcher,
-    line_matcher: &ExactMatcher,
+    ctx: &SearchMatchCtx,
 ) -> Option<SearchHit> {
     if !all_terms_match_tags(tag_matcher, tag_terms, &note.tags) {
         return None;
     }
 
     let searchable = searchable_lines(&note.lines);
-    if !all_terms_match_lines(line_matcher, &searchable, body_terms) {
+    if !all_body_terms_match(&searchable, body_terms, ctx) {
         return None;
     }
 
+    let score = compute_body_hit_score(&searchable, body_terms, ctx);
     searchable.into_iter().find_map(|(line_no, line)| {
         if body_terms
             .iter()
-            .any(|t| line_matcher.matches_line(line, t))
+            .any(|t| body_term_matches(line, t, ctx))
         {
-            Some(mixed_hit(path_str.to_string(), line_no, line.clone()))
+            Some(mixed_hit(
+                path_str.to_string(),
+                line_no,
+                line.clone(),
+                score,
+            ))
         } else {
             None
         }
@@ -244,13 +402,21 @@ pub(crate) fn search_notes_in_root(
     notes_root: &Path,
     query: &str,
 ) -> Result<SearchNotesResult, String> {
-    search_notes_in_root_with_mode(notes_root, query, MatchMode::Exact)
+    search_notes_in_root_impl(notes_root, query, false)
 }
 
 pub(crate) fn search_notes_in_root_with_mode(
     notes_root: &Path,
     query: &str,
     mode: MatchMode,
+) -> Result<SearchNotesResult, String> {
+    search_notes_in_root_impl(notes_root, query, mode == MatchMode::Exact)
+}
+
+fn search_notes_in_root_impl(
+    notes_root: &Path,
+    query: &str,
+    force_all_exact: bool,
 ) -> Result<SearchNotesResult, String> {
     let q = query.trim();
     if q.is_empty() {
@@ -263,8 +429,9 @@ pub(crate) fn search_notes_in_root_with_mode(
         return Err(err(app_error::NOTES_DIR_REQUIRED));
     }
 
-    let parsed = parse_query(q);
+    let parsed = parse_query(q, force_all_exact);
     let result_mode = search_mode_for_kind(parsed.kind);
+    let ctx = SearchMatchCtx { force_all_exact };
 
     let hits = match parsed.kind {
         QueryKind::Tag => {
@@ -274,8 +441,7 @@ pub(crate) fn search_notes_in_root_with_mode(
                     hits: vec![],
                 });
             }
-            let matcher = mode.tag_matcher();
-            search_by_tags(notes_root, &parsed.tag_terms, &matcher)?
+            search_by_tags(notes_root, &parsed.tag_terms, &ExactMatcher)?
         }
         QueryKind::Body => {
             if parsed.body_terms.is_empty() {
@@ -284,18 +450,14 @@ pub(crate) fn search_notes_in_root_with_mode(
                     hits: vec![],
                 });
             }
-            let matcher = mode.line_matcher();
-            search_by_body(notes_root, &parsed.body_terms, &matcher)?
+            search_by_body(notes_root, &parsed.body_terms, &ctx)?
         }
         QueryKind::Mixed => {
-            let tag_matcher = mode.tag_matcher();
-            let line_matcher = mode.line_matcher();
             search_by_mixed(
                 notes_root,
                 &parsed.tag_terms,
                 &parsed.body_terms,
-                &tag_matcher,
-                &line_matcher,
+                &ctx,
             )?
         }
     };
@@ -331,9 +493,14 @@ fn searchable_lines(lines: &[String]) -> Vec<(usize, &String)> {
 }
 
 #[tauri::command]
-pub fn search_notes(app: tauri::AppHandle, query: String) -> Result<SearchNotesResult, String> {
+pub async fn search_notes(
+    app: tauri::AppHandle,
+    query: String,
+) -> Result<SearchNotesResult, String> {
     let notes_root = resolve_notes_root(&app)?;
-    search_notes_in_root(&notes_root, &query)
+    tauri::async_runtime::spawn_blocking(move || search_notes_in_root(&notes_root, &query))
+        .await
+        .map_err(|e| format!("search_task_failed: {e}"))?
 }
 
 pub fn invalidate_search_cache() {
@@ -601,21 +768,109 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
-    /// あいまい検索（将来）: typo 1 文字・日本語などは `MatchMode::Fuzzy` 実装後に有効化
     #[test]
-    #[ignore = "fuzzy search not implemented"]
-    fn fuzzy_search_placeholder() {
-        let root = fresh_root("scriptax-search-fuzzy-placeholder-test");
+    fn fuzzy_search_matches_typo_in_body() {
+        let root = fresh_root("scriptax-search-fuzzy-typo-test");
         write_note(
             &root,
             "note.md",
-            "---\ntags: []\n---\n\nmeetng notes\n",
+            "---\ntags: []\n---\n\nweekly meeting notes\n",
         );
 
-        let exact = search_notes_in_root_with_mode(&root, "meeting", MatchMode::Exact).expect("exact");
+        let result = search_notes_in_root(&root, "meetng").expect("search");
+        assert_eq!(result.hits.len(), 1);
+        assert!(result.hits[0].path.ends_with("note.md"));
+        assert!(result.hits[0].score.is_some());
+
+        let exact = search_notes_in_root_with_mode(&root, "meetng", MatchMode::Exact)
+            .expect("exact");
         assert!(exact.hits.is_empty());
 
-        // TODO: MatchMode::Fuzzy で "meeting" がヒットし score > 0 になることを検証する
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn quoted_term_requires_exact_substring() {
+        let root = fresh_root("scriptax-search-quoted-exact-test");
+        write_note(
+            &root,
+            "note.md",
+            "---\ntags: []\n---\n\nweekly meeting notes\n",
+        );
+
+        let fuzzy = search_notes_in_root(&root, "meetng").expect("fuzzy");
+        assert_eq!(fuzzy.hits.len(), 1);
+
+        let quoted = search_notes_in_root(&root, "\"meetng\"").expect("quoted");
+        assert!(quoted.hits.is_empty());
+
+        let phrase = search_notes_in_root(&root, "\"weekly meeting\"").expect("phrase");
+        assert_eq!(phrase.hits.len(), 1);
+        assert!(phrase.hits[0].score.is_none());
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn parse_raw_terms_handles_quoted_phrase_and_tags() {
+        let terms = parse_raw_terms("#work \"weekly report\" meetng", false);
+        assert_eq!(terms.len(), 3);
+        assert!(matches!(&terms[0], RawTerm::Tag(t) if t == "work"));
+        assert!(matches!(
+            &terms[1],
+            RawTerm::Body(BodyTerm { text, exact: true }) if text == "weekly report"
+        ));
+        assert!(matches!(
+            &terms[2],
+            RawTerm::Body(BodyTerm { text, exact: false }) if text == "meetng"
+        ));
+    }
+
+    #[test]
+    fn parse_raw_terms_unclosed_quote_to_end() {
+        let terms = parse_raw_terms("\"hello world", false);
+        assert_eq!(terms.len(), 1);
+        assert!(matches!(
+            &terms[0],
+            RawTerm::Body(BodyTerm { text, exact: true }) if text == "hello world"
+        ));
+    }
+
+    #[test]
+    fn empty_quoted_term_is_skipped() {
+        let terms = parse_raw_terms("\"\"", false);
+        assert!(terms.is_empty());
+    }
+
+    #[test]
+    fn quoted_hash_is_body_not_tag() {
+        let terms = parse_raw_terms("\"#work\"", false);
+        assert_eq!(terms.len(), 1);
+        assert!(matches!(
+            &terms[0],
+            RawTerm::Body(BodyTerm { text, exact: true }) if text == "#work"
+        ));
+    }
+
+    #[test]
+    fn mixed_fuzzy_and_quoted_exact() {
+        let root = fresh_root("scriptax-search-mixed-fuzzy-quoted-test");
+        write_note(
+            &root,
+            "match.md",
+            "---\ntags: [work]\n---\n\nstand up meeting\n",
+        );
+        write_note(
+            &root,
+            "wrong-phrase.md",
+            "---\ntags: [work]\n---\n\nstandup meetng\n",
+        );
+
+        let result = search_notes_in_root(&root, "#work \"stand up\" meetng").expect("search");
+        assert_eq!(result.mode, SearchMode::Mixed);
+        assert_eq!(result.hits.len(), 1);
+        assert!(result.hits[0].path.ends_with("match.md"));
+
         let _ = fs::remove_dir_all(&root);
     }
 

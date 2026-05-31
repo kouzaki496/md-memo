@@ -3,9 +3,11 @@ import { ExternalLink, Lock, Pin, PinOff, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import type { NoteDetail, NoteMeta } from "@/types/note";
+import type { NoteMeta } from "@/types/note";
+import type { ManagerNoteRow } from "@/lib/managerSearchFilter";
 import { isSystemNotePath } from "@/lib/systemNotes";
 import { messages } from "@/lib/messages";
+import { SearchFuzzyBadge } from "@/components/app/SearchMatchHint";
 
 type ManagerPanelProps = {
   managerQuery: string;
@@ -13,7 +15,7 @@ type ManagerPanelProps = {
   maxChars: string;
   setMaxChars: (v: string) => void;
   selectedCount: number;
-  filteredDetails: NoteDetail[];
+  filteredDetails: ManagerNoteRow[];
   managerSearchError: boolean;
   managerSearchPending: boolean;
   selectedPaths: Set<string>;
@@ -56,8 +58,8 @@ export function ManagerPanel(props: ManagerPanelProps) {
     onCloseHoverPreview,
   } = props;
 
-  const renderTags = (tags: string[]) => {
-    if (tags.length === 0) return null;
+  const renderTags = (tags: string[] | undefined) => {
+    if (!tags?.length) return null;
     return (
       <div className="mt-1 flex flex-wrap gap-1">
         {tags.slice(0, 4).map((tag) => (
@@ -72,7 +74,7 @@ export function ManagerPanel(props: ManagerPanelProps) {
     );
   };
 
-  const toNoteMeta = (n: NoteDetail): NoteMeta => ({
+  const toNoteMeta = (n: ManagerNoteRow): NoteMeta => ({
     path: n.path,
     title: n.title,
     pinned: n.pinned,
@@ -138,23 +140,32 @@ export function ManagerPanel(props: ManagerPanelProps) {
                 className="mt-1 h-5 w-5 cursor-pointer rounded border-border accent-primary disabled:cursor-not-allowed disabled:opacity-40"
               />
               <div className="min-w-0 flex-1">
-                <button type="button" className="text-left w-full" onClick={() => onOpenNote(n.path)}>
-                  <div className="truncate font-medium">
-                    {n.title}
-                    {isSystemNote && (
-                      <Lock
-                        className="ml-1 inline-block h-3.5 w-3.5 align-text-top text-muted-foreground"
-                        aria-label={messages.aria.builtinNote}
-                      />
-                    )}
-                    {n.pinned && <Pin className="ml-1 inline-block h-3.5 w-3.5 align-text-top text-muted-foreground" />}
-                  </div>
-                  {renderTags(n.tags)}
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {messages.manager.charCount(n.charCount)}
-                    {n.preview ? ` / ${n.preview}` : ` / ${messages.manager.emptyPreview}`}
-                  </div>
-                </button>
+                <div className="flex min-w-0 items-start gap-1">
+                  <button
+                    type="button"
+                    className="min-w-0 flex-1 text-left"
+                    onClick={() => onOpenNote(n.path)}
+                  >
+                    <div className="truncate font-medium">
+                      {n.title}
+                      {isSystemNote && (
+                        <Lock
+                          className="ml-1 inline-block h-3.5 w-3.5 align-text-top text-muted-foreground"
+                          aria-label={messages.aria.builtinNote}
+                        />
+                      )}
+                      {n.pinned && (
+                        <Pin className="ml-1 inline-block h-3.5 w-3.5 align-text-top text-muted-foreground" />
+                      )}
+                    </div>
+                    {renderTags(n.tags)}
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {messages.manager.charCount(n.charCount ?? 0)}
+                      {n.preview ? ` / ${n.preview}` : ` / ${messages.manager.emptyPreview}`}
+                    </div>
+                  </button>
+                  {n.searchFuzzy && <SearchFuzzyBadge />}
+                </div>
               </div>
               <div className="flex shrink-0 items-center gap-0.5">
                 <Button
