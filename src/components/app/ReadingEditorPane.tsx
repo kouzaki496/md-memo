@@ -28,6 +28,7 @@ import {
   Monitor,
   Pencil,
   Plus,
+  Printer,
   SquareArrowOutUpRight,
   Trash2,
   XCircle,
@@ -43,6 +44,7 @@ import {
 import { isBuiltinReservedTagName } from "@/lib/reservedTags";
 import { messages } from "@/lib/messages";
 import { createMarkdownPreviewComponents } from "@/lib/markdownPreviewComponents";
+import { memoPdfBasename, printMarkdownPreview } from "@/lib/printPreview";
 import type { SearchMode } from "@/types/note";
 import { useSearchHighlightTerms } from "@/hooks/useSearchHighlight";
 import {
@@ -406,6 +408,31 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
     [highlightTerms]
   );
 
+  const handlePrintPreview = useCallback(() => {
+    const root = previewPrintRef.current;
+    if (!root) return;
+    void printMarkdownPreview(root, {
+      suggestedFilename: memoPdfBasename(currentFileName),
+    });
+  }, [currentFileName]);
+
+  const renderPrintButton = () => (
+    <Button
+      type="button"
+      variant="outline"
+      size="icon-sm"
+      className={toolbarBtn}
+      title={messages.editor.printToPdfHint}
+      aria-label={messages.editor.printToPdf}
+      onClick={handlePrintPreview}
+    >
+      <Printer className="h-4 w-4" />
+    </Button>
+  );
+
+  const previewMarkdownClassName =
+    "markdown-preview prose prose-slate dark:prose-invert prose-headings:font-heading max-w-none";
+
   const previewMarkdown = useMemo(() => getMarkdownBody(input), [input]);
   const editorLineCount = useMemo(() => Math.max(1, input.split("\n").length), [input]);
   const previewBodyLineCount = useMemo(
@@ -422,6 +449,7 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
   const editorGutterInnerRef = useRef<HTMLDivElement>(null);
   const splitPreviewScrollHostRef = useRef<HTMLDivElement>(null);
   const previewOnlyScrollHostRef = useRef<HTMLDivElement>(null);
+  const previewPrintRef = useRef<HTMLDivElement>(null);
   const scrollSyncLockRef = useRef<"editor" | "preview" | null>(null);
   const editorFontSizeRem = 1.125 * contentScale;
   const editorLineHeightRem = 1.8 * contentScale;
@@ -1397,6 +1425,7 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
               </span>
             </span>
             <div className="flex items-center gap-1">
+              {renderPrintButton()}
               {onOpenInNewWindow && (
                 <Button
                   type="button"
@@ -1448,7 +1477,8 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
             <ScrollArea className="min-h-0 flex-1 overflow-hidden p-8">
               {renderPreviewTagsBar()}
               <div
-                className="markdown-preview prose prose-slate dark:prose-invert prose-headings:font-heading max-w-none"
+                ref={previewPrintRef}
+                className={previewMarkdownClassName}
                 style={{ fontSize: `${contentScale}rem` }}
                 tabIndex={0}
                 onKeyDown={(e) => handleScaleShortcut(e, onAdjustContentScale, onResetContentScale)}
@@ -1476,6 +1506,7 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
           </span>
         </span>
         <div className="flex items-center gap-1">
+          {renderPrintButton()}
           <Button
             type="button"
             variant="outline"
@@ -1562,7 +1593,8 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
         <ScrollArea className="min-h-0 flex-1 overflow-hidden p-8">
           {renderPreviewTagsBar()}
           <div
-            className="markdown-preview prose prose-slate dark:prose-invert prose-headings:font-heading max-w-none"
+            ref={previewPrintRef}
+            className={previewMarkdownClassName}
             style={{ fontSize: `${contentScale}rem` }}
             tabIndex={0}
             onKeyDown={(e) => handleScaleShortcut(e, onAdjustContentScale, onResetContentScale)}

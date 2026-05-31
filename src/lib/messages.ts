@@ -153,6 +153,8 @@ export const messages = {
     tagsBar: "タグ",
     tagsNone: "（なし）",
     lineCount: (n: number) => `${n} 行`,
+    printToPdf: "PDF に出力…",
+    printToPdfHint: "印刷ダイアログで「PDF に保存」を選ぶと、ファイル名はメモ名になります",
   },
 
   presentation: {
