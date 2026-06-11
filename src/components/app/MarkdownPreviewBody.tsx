@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 const remarkPreviewPlugins = [remarkGfm, remarkBreaks];
 
 const previewMarkdownClassName =
-  "markdown-preview prose prose-slate dark:prose-invert prose-headings:font-heading max-w-none";
+  "markdown-preview prose prose-slate dark:prose-invert prose-headings:font-heading max-w-none min-w-0 w-full";
 
 type MarkdownPreviewBodyProps = {
   previewMarkdown: string;

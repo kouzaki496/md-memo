@@ -178,6 +178,7 @@
 .markdown-preview .md-code-block,
 .markdown-preview div[class*="language-"] {
   margin: 0.75rem 0 !important;
+  max-width: 100%;
   overflow-x: auto;
   border-radius: 0.375rem;
   background: #1e1e1e !important;
@@ -186,6 +187,8 @@
   --tw-prose-pre-code: #d4d4d4;
 }
 
+.markdown-preview .md-code-block pre,
+.markdown-preview div[class*="language-"] pre,
 .markdown-preview .md-code-block code,
 .markdown-preview div[class*="language-"] code {
   background: transparent !important;
@@ -196,6 +199,9 @@
   font-size: 0.875em;
   line-height: 1.6;
   tab-size: 2;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .markdown-preview .md-code-block :is(span, .token),

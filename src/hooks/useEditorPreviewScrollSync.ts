@@ -36,17 +36,21 @@ export function useEditorPreviewScrollSync(options: UseEditorPreviewScrollSyncOp
     if (inner) inner.style.transform = `translateY(-${scrollTop}px)`;
   }, []);
 
-  const getSplitPreviewViewport = useCallback((): HTMLDivElement | null => {
-    const host = splitPreviewScrollHostRef.current;
-    return host?.querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]') ?? null;
+  const resolvePreviewViewport = useCallback((host: HTMLDivElement | null): HTMLDivElement | null => {
+    if (!host) return null;
+    if (host.dataset.slot === "preview-scroll-viewport") return host;
+    return host.querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]');
   }, []);
 
+  const getSplitPreviewViewport = useCallback((): HTMLDivElement | null => {
+    return resolvePreviewViewport(splitPreviewScrollHostRef.current);
+  }, [resolvePreviewViewport]);
+
   const getPreviewScrollViewport = useCallback((): HTMLDivElement | null => {
-    const splitHost = splitPreviewScrollHostRef.current;
-    const previewHost = previewOnlyScrollHostRef.current;
-    const host = splitHost ?? previewHost;
-    return host?.querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]') ?? null;
-  }, []);
+    return resolvePreviewViewport(
+      splitPreviewScrollHostRef.current ?? previewOnlyScrollHostRef.current
+    );
+  }, [resolvePreviewViewport]);
 
   useLayoutEffect(() => {
     if (!onPresentationPreviewScroll) return;

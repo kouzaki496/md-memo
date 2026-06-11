@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 function useDocumentDark(): boolean {
   const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains("dark"));
@@ -23,6 +23,7 @@ export function MarkdownMermaid(props: MarkdownMermaidProps) {
   const { chart } = props;
   const containerRef = useRef<HTMLDivElement>(null);
   const isDark = useDocumentDark();
+  const renderId = useId().replace(/:/g, "");
 
   useEffect(() => {
     const container = containerRef.current;
@@ -30,30 +31,36 @@ export function MarkdownMermaid(props: MarkdownMermaidProps) {
 
     let cancelled = false;
 
-    void import("mermaid").then(({ default: mermaid }) => {
+    void (async () => {
+      const { default: mermaid } = await import("mermaid");
       if (cancelled) return;
 
       mermaid.initialize({
         startOnLoad: false,
         theme: isDark ? "dark" : "default",
-        securityLevel: "strict",
+        // strict は DOMPurify 連携で WebView 上で失敗することがある
+        securityLevel: "loose",
       });
 
-      container.replaceChildren();
-      const pre = document.createElement("pre");
-      pre.className = "mermaid";
-      pre.textContent = chart;
-      container.appendChild(pre);
-
-      void mermaid.run({ nodes: [pre] }).catch((err: unknown) => {
+      try {
+        const { svg } = await mermaid.render(`md-mermaid-${renderId}`, chart);
+        if (cancelled) return;
+        container.innerHTML = svg;
+      } catch (err) {
         console.error("Mermaid render failed:", err);
-      });
-    });
+        if (cancelled) return;
+        container.replaceChildren();
+        const pre = document.createElement("pre");
+        pre.className = "mermaid mermaid--error";
+        pre.textContent = chart;
+        container.appendChild(pre);
+      }
+    })();
 
     return () => {
       cancelled = true;
     };
-  }, [chart, isDark]);
+  }, [chart, isDark, renderId]);
 
   return <div ref={containerRef} className="md-mermaid not-prose" />;
 }

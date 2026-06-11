@@ -22,13 +22,50 @@ const PRINT_STYLE = `
   .markdown-preview {
     font-size: 1rem !important;
     max-width: none;
+    min-width: 0;
+    overflow-wrap: break-word;
+  }
+  .markdown-preview :is(p, li, td, th, blockquote, dd, a) {
+    overflow-wrap: break-word;
+  }
+  .markdown-preview :is(p, li, td, th, blockquote) > code,
+  .markdown-preview .md-code-block pre,
+  .markdown-preview .md-code-block code,
+  .markdown-preview div[class*="language-"] pre,
+  .markdown-preview div[class*="language-"] code {
+    white-space: pre-wrap !important;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
   .markdown-preview img {
     max-width: 100%;
     height: auto;
   }
+  .markdown-preview .md-table-wrap {
+    max-width: 100%;
+    overflow: visible;
+    page-break-inside: avoid;
+  }
+  .markdown-preview .md-table-wrap table {
+    display: table !important;
+    min-width: 0 !important;
+    width: 100% !important;
+    table-layout: auto;
+    border-collapse: collapse;
+  }
+  .markdown-preview .md-table-wrap th,
+  .markdown-preview .md-table-wrap td {
+    overflow-wrap: break-word;
+    word-break: break-word;
+  }
+  .markdown-preview .md-mermaid svg {
+    max-width: 100%;
+    height: auto;
+  }
   .markdown-preview .md-code-block,
   .markdown-preview div[class*="language-"] {
+    max-width: 100%;
+    overflow-x: visible;
     background: #1e1e1e !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
@@ -103,8 +140,9 @@ export async function printMarkdownPreview(
 ): Promise<void> {
   const iframe = document.createElement("iframe");
   iframe.setAttribute("aria-hidden", "true");
+  // width/height 0 の iframe だと印刷レイアウト幅が 0 になりテーブル等が消える
   iframe.style.cssText =
-    "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;";
+    "position:fixed;left:0;top:0;width:100%;height:100%;border:0;visibility:hidden;pointer-events:none;z-index:-1;";
   document.body.appendChild(iframe);
 
   const doc = iframe.contentDocument;
@@ -171,6 +209,10 @@ export async function printMarkdownPreview(
   try {
     await waitForStyles(doc);
     await doc.fonts?.ready;
+    void doc.body.offsetHeight;
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
     win.focus();
     win.print();
   } catch (err) {

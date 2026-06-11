@@ -1,5 +1,4 @@
 import { type MouseEvent, type RefObject, useCallback, useMemo, useRef, useState } from "react";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { EditorEditToolbar } from "@/components/app/EditorEditToolbar";
 import { EditorLineGutter } from "@/components/app/EditorLineGutter";
 import { EditorTagsBar, persistTagsBarExpanded, readInitialTagsBarExpanded } from "@/components/app/EditorTagsBar";
@@ -238,8 +237,12 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
             onPresentInBrowser={onPresentInBrowser}
             onDeleteCurrentNote={onDeleteCurrentNote}
           />
-          <div ref={splitPreviewScrollHostRef} className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <ScrollArea className="min-h-0 flex-1 overflow-hidden p-8">{previewBody}</ScrollArea>
+          <div
+            ref={splitPreviewScrollHostRef}
+            data-slot="preview-scroll-viewport"
+            className="min-h-0 min-w-0 flex-1 overflow-auto p-8"
+          >
+            {previewBody}
           </div>
         </aside>
       </div>
@@ -271,8 +274,12 @@ export function ReadingEditorPane(props: ReadingEditorPaneProps) {
         onEnterEditMode={onEnterEditMode}
         onDeleteCurrentNote={onDeleteCurrentNote}
       />
-      <div ref={previewOnlyScrollHostRef} className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <ScrollArea className="min-h-0 flex-1 overflow-hidden p-8">{previewBody}</ScrollArea>
+      <div
+        ref={previewOnlyScrollHostRef}
+        data-slot="preview-scroll-viewport"
+        className="min-h-0 min-w-0 flex-1 overflow-auto p-8"
+      >
+        {previewBody}
       </div>
     </main>
   );
